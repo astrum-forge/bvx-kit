@@ -155,6 +155,22 @@ export default class MortonKey {
         return optres;
     }
 
+    public add(other: MortonKey, optres: MortonKey | null = null): MortonKey {
+        optres = optres || this;
+
+        MortonKey.add(this, other, optres);
+
+        return optres;
+    }
+
+    public sub(other: MortonKey, optres: MortonKey | null = null): MortonKey {
+        optres = optres || this;
+
+        MortonKey.sub(this, other, optres);
+
+        return optres;
+    }
+
     public get key(): number {
         return this._key;
     }
@@ -213,5 +229,9 @@ export default class MortonKey {
         optres._key = this._key;
 
         return optres;
+    }
+
+    public cmp(other: MortonKey): boolean {
+        return this._key === other._key;
     }
 }
