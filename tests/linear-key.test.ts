@@ -1,10 +1,10 @@
-import MortonKey from '../src/math/morton-key';
+import LinearKey from '../src/math/linear-key';
 
 /**
- * Provides 100% Coverage for morton-key.ts
+ * Provides 100% Coverage for linear-key.ts
  */
-describe('MortonKey', () => {
-    const clazz = MortonKey;
+describe('LinearKey', () => {
+    const clazz = LinearKey;
 
     const randomX = 57;
     const randomY = 73;
