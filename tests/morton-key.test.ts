@@ -102,6 +102,9 @@ describe('MortonKey', () => {
         }
     });
 
+    /**
+     * TESTS for .incX() - increment coordinates by one at a time
+     */
     it('.incX() - min value', () => {
         const key = clazz.from(minX, randomY, randomZ);
 
@@ -142,6 +145,9 @@ describe('MortonKey', () => {
         expect(key.z).toBe(randomZ);
     });
 
+    /**
+     * TESTS for .decX() - decrement coordinates by one at a time
+     */
     it('.decX() - min value', () => {
         const key = clazz.from(minX + 1, randomY, randomZ);
 
@@ -179,6 +185,92 @@ describe('MortonKey', () => {
 
         expect(key.x).toBe(maxX);
         expect(key.y).toBe(randomY);
+        expect(key.z).toBe(randomZ);
+    });
+
+    /**
+     * TESTS for .incY() - increment coordinates by one at a time
+     */
+    it('.incY() - min value', () => {
+        const key = clazz.from(randomX, minY, randomZ);
+
+        key.incY();
+
+        expect(key.x).toBe(randomX);
+        expect(key.y).toBe(minY + 1);
+        expect(key.z).toBe(randomZ);
+    });
+
+    it('.incY() - random value', () => {
+        const key = clazz.from(randomX, randomY, randomZ);
+
+        key.incY();
+
+        expect(key.x).toBe(randomX);
+        expect(key.y).toBe(randomY + 1);
+        expect(key.z).toBe(randomZ);
+    });
+
+    it('.incY() - max value', () => {
+        const key = clazz.from(randomX, maxY - 1, randomZ);
+
+        key.incY();
+
+        expect(key.x).toBe(randomX);
+        expect(key.y).toBe(maxY);
+        expect(key.z).toBe(randomZ);
+    });
+
+    it('.incY() - overflow value', () => {
+        const key = clazz.from(randomX, maxY, randomZ);
+
+        key.incY();
+
+        expect(key.x).toBe(randomX);
+        expect(key.y).toBe(minY);
+        expect(key.z).toBe(randomZ);
+    });
+
+    /**
+     * TESTS for .decY() - decrement coordinates by one at a time
+     */
+    it('.decY() - min value', () => {
+        const key = clazz.from(randomX, minY + 1, randomZ);
+
+        key.decY();
+
+        expect(key.x).toBe(randomX);
+        expect(key.y).toBe(minY);
+        expect(key.z).toBe(randomZ);
+    });
+
+    it('.decY() - random value', () => {
+        const key = clazz.from(randomX, randomY, randomZ);
+
+        key.decY();
+
+        expect(key.x).toBe(randomX);
+        expect(key.y).toBe(randomY - 1);
+        expect(key.z).toBe(randomZ);
+    });
+
+    it('.decY() - max value', () => {
+        const key = clazz.from(randomX, maxY, randomZ);
+
+        key.decY();
+
+        expect(key.x).toBe(randomX);
+        expect(key.y).toBe(maxY - 1);
+        expect(key.z).toBe(randomZ);
+    });
+
+    it('.decY() - underflow value', () => {
+        const key = clazz.from(randomX, minY, randomZ);
+
+        key.decY();
+
+        expect(key.x).toBe(randomX);
+        expect(key.y).toBe(maxY);
         expect(key.z).toBe(randomZ);
     });
 
