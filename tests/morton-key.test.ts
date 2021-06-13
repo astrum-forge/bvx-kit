@@ -1,6 +1,8 @@
 import MortonKey from '../src/math/morton-key';
 
 describe('MortonKey', () => {
+    const clazz = MortonKey;
+
     const randomX = 57;
     const randomY = 73;
     const randomZ = 91;
@@ -14,27 +16,27 @@ describe('MortonKey', () => {
     const maxZ = 1023;
 
     it('.from() - min values', () => {
-        expect(() => MortonKey.from(minX, minY, minZ)).not.toThrow(Error);
+        expect(() => clazz.from(minX, minY, minZ)).not.toThrow(Error);
     });
 
     it('.from() - max values', () => {
-        expect(() => MortonKey.from(maxX, maxY, maxZ)).not.toThrow(Error);
+        expect(() => clazz.from(maxX, maxY, maxZ)).not.toThrow(Error);
     });
 
     it('.from() - negative values', () => {
-        expect(() => MortonKey.from(minX - 1, minY, minZ)).toThrow(Error);
-        expect(() => MortonKey.from(minX, minY - 1, minZ)).toThrow(Error);
-        expect(() => MortonKey.from(minX, minY, minZ - 1)).toThrow(Error);
+        expect(() => clazz.from(minX - 1, minY, minZ)).toThrow(Error);
+        expect(() => clazz.from(minX, minY - 1, minZ)).toThrow(Error);
+        expect(() => clazz.from(minX, minY, minZ - 1)).toThrow(Error);
     });
 
     it('.from() - overflow values', () => {
-        expect(() => MortonKey.from(maxX + 1, maxY, maxZ)).toThrow(Error);
-        expect(() => MortonKey.from(maxX, maxY + 1, maxZ)).toThrow(Error);
-        expect(() => MortonKey.from(maxX, maxY, maxZ + 1)).toThrow(Error);
+        expect(() => clazz.from(maxX + 1, maxY, maxZ)).toThrow(Error);
+        expect(() => clazz.from(maxX, maxY + 1, maxZ)).toThrow(Error);
+        expect(() => clazz.from(maxX, maxY, maxZ + 1)).toThrow(Error);
     });
 
     it('.from(0, 0, 0) - x, y, z values', () => {
-        const key = MortonKey.from(minX, minY, minZ);
+        const key = clazz.from(minX, minY, minZ);
 
         expect(key.x).toBe(minX);
         expect(key.y).toBe(minY);
@@ -42,7 +44,7 @@ describe('MortonKey', () => {
     });
 
     it('.from(1023, 1023, 1023) - x, y, z values', () => {
-        const key = MortonKey.from(maxX, maxY, maxZ);
+        const key = clazz.from(maxX, maxY, maxZ);
 
         expect(key.x).toBe(maxX);
         expect(key.y).toBe(maxY);
@@ -56,7 +58,7 @@ describe('MortonKey', () => {
         for (let x = min; x < max; x++) {
             for (let y = min; y < max; y++) {
                 for (let z = min; z < max; z++) {
-                    const key = MortonKey.from(x, y, z);
+                    const key = clazz.from(x, y, z);
 
                     expect(key.x).toBe(x);
                     expect(key.y).toBe(y);
@@ -73,7 +75,7 @@ describe('MortonKey', () => {
         for (let x = min; x < max; x++) {
             for (let y = min; y < max; y++) {
                 for (let z = min; z < max; z++) {
-                    const key = MortonKey.from(x, y, z);
+                    const key = clazz.from(x, y, z);
 
                     expect(key.x).toBe(x);
                     expect(key.y).toBe(y);
@@ -90,7 +92,7 @@ describe('MortonKey', () => {
         for (let x = min; x < max; x++) {
             for (let y = min; y < max; y++) {
                 for (let z = min; z < max; z++) {
-                    const key = MortonKey.from(x, y, z);
+                    const key = clazz.from(x, y, z);
 
                     expect(key.x).toBe(x);
                     expect(key.y).toBe(y);
@@ -101,7 +103,7 @@ describe('MortonKey', () => {
     });
 
     it('.incX() - min value', () => {
-        const key = MortonKey.from(minX, randomY, randomZ);
+        const key = clazz.from(minX, randomY, randomZ);
 
         key.incX();
 
@@ -111,7 +113,7 @@ describe('MortonKey', () => {
     });
 
     it('.incX() - random value', () => {
-        const key = MortonKey.from(randomX, randomY, randomZ);
+        const key = clazz.from(randomX, randomY, randomZ);
 
         key.incX();
 
@@ -121,7 +123,7 @@ describe('MortonKey', () => {
     });
 
     it('.incX() - max value', () => {
-        const key = MortonKey.from(maxX - 1, randomY, randomZ);
+        const key = clazz.from(maxX - 1, randomY, randomZ);
 
         key.incX();
 
@@ -130,8 +132,18 @@ describe('MortonKey', () => {
         expect(key.z).toBe(randomZ);
     });
 
+    it('.incX() - overflow value', () => {
+        const key = clazz.from(maxX, randomY, randomZ);
+
+        key.incX();
+
+        expect(key.x).toBe(minX);
+        expect(key.y).toBe(randomY);
+        expect(key.z).toBe(randomZ);
+    });
+
     it('.decX() - min value', () => {
-        const key = MortonKey.from(minX + 1, randomY, randomZ);
+        const key = clazz.from(minX + 1, randomY, randomZ);
 
         key.decX();
 
@@ -141,7 +153,7 @@ describe('MortonKey', () => {
     });
 
     it('.decX() - random value', () => {
-        const key = MortonKey.from(randomX, randomY, randomZ);
+        const key = clazz.from(randomX, randomY, randomZ);
 
         key.decX();
 
@@ -151,11 +163,21 @@ describe('MortonKey', () => {
     });
 
     it('.decX() - max value', () => {
-        const key = MortonKey.from(maxX, randomY, randomZ);
+        const key = clazz.from(maxX, randomY, randomZ);
 
         key.decX();
 
         expect(key.x).toBe(maxX - 1);
+        expect(key.y).toBe(randomY);
+        expect(key.z).toBe(randomZ);
+    });
+
+    it('.decX() - underflow value', () => {
+        const key = clazz.from(minX, randomY, randomZ);
+
+        key.decX();
+
+        expect(key.x).toBe(maxX);
         expect(key.y).toBe(randomY);
         expect(key.z).toBe(randomZ);
     });
