@@ -1,7 +1,7 @@
 {
   "name": "bvx.ts",
   "version": "1.0.0",
-  "description": "Generic BitVoxel Engine implementation in TypeScript",
+  "description": "Generic BitVoxel Engine Implementation in TypeScript",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -14,7 +14,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/DavidArayan/gfx.ts.git"
+    "url": "git+https://github.com/DavidArayan/bvx.ts.git"
   },
   "keywords": [
     "webgl",

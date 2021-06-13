@@ -11,7 +11,6 @@
  * See: https://en.wikipedia.org/wiki/Z-order_curve
  */
 export default class LinearKey {
-
     public static readonly KEY_MASK: number = 0x3FF;
 
     private _key: number = 0;
