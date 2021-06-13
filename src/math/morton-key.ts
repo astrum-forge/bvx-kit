@@ -183,31 +183,35 @@ export default class MortonKey {
         MortonKey.from(this.x, this.y, value, this);
     }
 
-    public incX(): MortonKey {
-        return MortonKey.incX(this, this);
+    public incX(optres: MortonKey | null = null): MortonKey {
+        return MortonKey.incX(this, optres || this);
     }
 
-    public incY(): MortonKey {
-        return MortonKey.incY(this, this);
+    public incY(optres: MortonKey | null = null): MortonKey {
+        return MortonKey.incY(this, optres || this);
     }
 
-    public incZ(): MortonKey {
-        return MortonKey.incZ(this, this);
+    public incZ(optres: MortonKey | null = null): MortonKey {
+        return MortonKey.incZ(this, optres || this);
     }
 
-    public decX(): MortonKey {
-        return MortonKey.decX(this, this);
+    public decX(optres: MortonKey | null = null): MortonKey {
+        return MortonKey.decX(this, optres || this);
     }
 
-    public decY(): MortonKey {
-        return MortonKey.decY(this, this);
+    public decY(optres: MortonKey | null = null): MortonKey {
+        return MortonKey.decY(this, optres || this);
     }
 
-    public decZ(): MortonKey {
-        return MortonKey.decZ(this, this);
+    public decZ(optres: MortonKey | null = null): MortonKey {
+        return MortonKey.decZ(this, optres || this);
     }
 
-    public copy(): MortonKey {
-        return new MortonKey(this._key);
+    public copy(optres: MortonKey | null = null): MortonKey {
+        optres = optres || new MortonKey();
+
+        optres._key = this._key;
+
+        return optres;
     }
 }

@@ -1,40 +1,52 @@
 import MortonKey from '../src/math/morton-key';
 
 describe('MortonKey', () => {
+    const randomX = 57;
+    const randomY = 73;
+    const randomZ = 91;
+
+    const minX = 0;
+    const minY = 0;
+    const minZ = 0;
+
+    const maxX = 1023;
+    const maxY = 1023;
+    const maxZ = 1023;
+
     it('.from() - min values', () => {
-        expect(() => MortonKey.from(0, 0, 0)).not.toThrow(Error);
+        expect(() => MortonKey.from(minX, minY, minZ)).not.toThrow(Error);
     });
 
     it('.from() - max values', () => {
-        expect(() => MortonKey.from(1023, 1023, 1023)).not.toThrow(Error);
+        expect(() => MortonKey.from(maxX, maxY, maxZ)).not.toThrow(Error);
     });
 
     it('.from() - negative values', () => {
-        expect(() => MortonKey.from(-1, 0, 0)).toThrow(Error);
-        expect(() => MortonKey.from(0, -1, 0)).toThrow(Error);
-        expect(() => MortonKey.from(0, 0, -1)).toThrow(Error);
+        expect(() => MortonKey.from(minX - 1, minY, minZ)).toThrow(Error);
+        expect(() => MortonKey.from(minX, minY - 1, minZ)).toThrow(Error);
+        expect(() => MortonKey.from(minX, minY, minZ - 1)).toThrow(Error);
     });
 
     it('.from() - overflow values', () => {
-        expect(() => MortonKey.from(1024, 0, 0)).toThrow(Error);
-        expect(() => MortonKey.from(0, 1024, 0)).toThrow(Error);
-        expect(() => MortonKey.from(0, 0, 1024)).toThrow(Error);
+        expect(() => MortonKey.from(maxX + 1, maxY, maxZ)).toThrow(Error);
+        expect(() => MortonKey.from(maxX, maxY + 1, maxZ)).toThrow(Error);
+        expect(() => MortonKey.from(maxX, maxY, maxZ + 1)).toThrow(Error);
     });
 
     it('.from(0, 0, 0) - x, y, z values', () => {
-        const key = MortonKey.from(0, 0, 0);
+        const key = MortonKey.from(minX, minY, minZ);
 
-        expect(key.x).toBe(0);
-        expect(key.y).toBe(0);
-        expect(key.z).toBe(0);
+        expect(key.x).toBe(minX);
+        expect(key.y).toBe(minY);
+        expect(key.z).toBe(minZ);
     });
 
     it('.from(1023, 1023, 1023) - x, y, z values', () => {
-        const key = MortonKey.from(1023, 1023, 1023);
+        const key = MortonKey.from(maxX, maxY, maxZ);
 
-        expect(key.x).toBe(1023);
-        expect(key.y).toBe(1023);
-        expect(key.z).toBe(1023);
+        expect(key.x).toBe(maxX);
+        expect(key.y).toBe(maxY);
+        expect(key.z).toBe(maxZ);
     });
 
     it('.from() - x(0-11), y(0-11), z(0-11) values', () => {
@@ -86,6 +98,66 @@ describe('MortonKey', () => {
                 }
             }
         }
+    });
+
+    it('.incX() - min value', () => {
+        const key = MortonKey.from(minX, randomY, randomZ);
+
+        key.incX();
+
+        expect(key.x).toBe(minX + 1);
+        expect(key.y).toBe(randomY);
+        expect(key.z).toBe(randomZ);
+    });
+
+    it('.incX() - random value', () => {
+        const key = MortonKey.from(randomX, randomY, randomZ);
+
+        key.incX();
+
+        expect(key.x).toBe(randomX + 1);
+        expect(key.y).toBe(randomY);
+        expect(key.z).toBe(randomZ);
+    });
+
+    it('.incX() - max value', () => {
+        const key = MortonKey.from(maxX - 1, randomY, randomZ);
+
+        key.incX();
+
+        expect(key.x).toBe(maxX);
+        expect(key.y).toBe(randomY);
+        expect(key.z).toBe(randomZ);
+    });
+
+    it('.decX() - min value', () => {
+        const key = MortonKey.from(minX + 1, randomY, randomZ);
+
+        key.decX();
+
+        expect(key.x).toBe(minX);
+        expect(key.y).toBe(randomY);
+        expect(key.z).toBe(randomZ);
+    });
+
+    it('.decX() - random value', () => {
+        const key = MortonKey.from(randomX, randomY, randomZ);
+
+        key.decX();
+
+        expect(key.x).toBe(randomX - 1);
+        expect(key.y).toBe(randomY);
+        expect(key.z).toBe(randomZ);
+    });
+
+    it('.decX() - max value', () => {
+        const key = MortonKey.from(maxX, randomY, randomZ);
+
+        key.decX();
+
+        expect(key.x).toBe(maxX - 1);
+        expect(key.y).toBe(randomY);
+        expect(key.z).toBe(randomZ);
     });
 
 });
