@@ -1,0 +1,41 @@
+{
+  "name": "bvx.ts",
+  "version": "1.0.0",
+  "description": "Generic BitVoxel Engine implementation in TypeScript",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "clean": "rm -rf dist node_modules",
+    "build-ts": "rm -rf dist && tsc --noEmitOnError",
+    "build": "npm run build-ts",
+    "watch": "watch 'npm run build' ./src"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DavidArayan/gfx.ts.git"
+  },
+  "keywords": [
+    "webgl",
+    "renderer",
+    "rendering",
+    "3d",
+    "graphics",
+    "voxels",
+    "voxel",
+    "bitvoxel",
+    "mesh",
+    "geometry",
+    "scenegraph",
+    "ecs"
+  ],
+  "author": "David Arayan",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/DavidArayan/bvx.ts/issues"
+  },
+  "homepage": "https://github.com/DavidArayan/bvx.ts#readme",
+  "devDependencies": {
+    "typescript": "^4.3.2",
+    "watch": "^1.0.2"
+  }
+}
