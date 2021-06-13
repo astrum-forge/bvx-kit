@@ -397,7 +397,7 @@ describe('MortonKey', () => {
         expect(key.z).toBe(maxZ);
     });
 
-    it('set,get .x .y .z - random values', () => {
+    it('set & get .x .y .z - random values', () => {
         const key = new clazz();
 
         key.x = randomX;
@@ -409,7 +409,7 @@ describe('MortonKey', () => {
         expect(key.z).toBe(randomZ);
     });
 
-    it('set,get .x .y .z - min values', () => {
+    it('set & get .x .y .z - min values', () => {
         const key = new clazz();
 
         key.x = minX;
@@ -421,7 +421,7 @@ describe('MortonKey', () => {
         expect(key.z).toBe(minZ);
     });
 
-    it('set,get .x .y .z - max values', () => {
+    it('set & get .x .y .z - max values', () => {
         const key = new clazz();
 
         key.x = maxX;
@@ -431,6 +431,58 @@ describe('MortonKey', () => {
         expect(key.x).toBe(maxX);
         expect(key.y).toBe(maxY);
         expect(key.z).toBe(maxZ);
+    });
+
+    it('.add() - key addition - independent', () => {
+        const key1 = clazz.from(randomX, randomY, randomZ);
+        const key2 = clazz.from(randomZ, randomX, randomY);
+
+        const add = key1.add(key2, new MortonKey());
+
+        expect(add.x).toBe(randomX + randomZ);
+        expect(add.y).toBe(randomY + randomX);
+        expect(add.z).toBe(randomZ + randomY);
+    });
+
+    it('.add() - key addition - dependent', () => {
+        const key1 = clazz.from(randomX, randomY, randomZ);
+        const key2 = clazz.from(randomZ, randomX, randomY);
+
+        const add = key1.add(key2);
+
+        expect(add.x).toBe(randomX + randomZ);
+        expect(add.y).toBe(randomY + randomX);
+        expect(add.z).toBe(randomZ + randomY);
+
+        expect(add.x).toBe(key1.x);
+        expect(add.y).toBe(key1.y);
+        expect(add.z).toBe(key1.z);
+    });
+
+    it('.sub() - key subtraction - independent', () => {
+        const key1 = clazz.from(maxX, maxY, maxZ);
+        const key2 = clazz.from(randomX, randomY, randomZ);
+
+        const add = key1.sub(key2, new MortonKey());
+
+        expect(add.x).toBe(maxX - randomX);
+        expect(add.y).toBe(maxY - randomY);
+        expect(add.z).toBe(maxZ - randomZ);
+    });
+
+    it('.sub() - key subtraction - dependent', () => {
+        const key1 = clazz.from(maxX, maxY, maxZ);
+        const key2 = clazz.from(randomX, randomY, randomZ);
+
+        const add = key1.sub(key2);
+
+        expect(add.x).toBe(maxX - randomX);
+        expect(add.y).toBe(maxY - randomY);
+        expect(add.z).toBe(maxZ - randomZ);
+
+        expect(add.x).toBe(key1.x);
+        expect(add.y).toBe(key1.y);
+        expect(add.z).toBe(key1.z);
     });
 
 });
