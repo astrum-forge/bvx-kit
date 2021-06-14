@@ -50,11 +50,11 @@ export default class LinearKey {
     public static add(a: LinearKey, b: LinearKey, optres: LinearKey | null = null): LinearKey {
         optres = optres || new LinearKey();
 
-        const sum_x: number = a.x + b.x;
-        const sum_y: number = a.y + b.y;
-        const sum_z: number = a.z + b.z;
+        const sumX: number = a.x + b.x;
+        const sumY: number = a.y + b.y;
+        const sumZ: number = a.z + b.z;
 
-        optres._key = LinearKey._Encode(sum_x, sum_y, sum_z);
+        optres._key = LinearKey._Encode(sumX, sumY, sumZ);
 
         return optres;
     }
@@ -62,11 +62,11 @@ export default class LinearKey {
     public static sub(a: LinearKey, b: LinearKey, optres: LinearKey | null = null): LinearKey {
         optres = optres || new LinearKey();
 
-        const sub_x: number = a.x - b.x;
-        const sub_y: number = a.y - b.y;
-        const sub_z: number = a.z - b.z;
+        const subX: number = a.x - b.x;
+        const subY: number = a.y - b.y;
+        const subZ: number = a.z - b.z;
 
-        optres._key = LinearKey._Encode(sub_x, sub_y, sub_z);
+        optres._key = LinearKey._Encode(subX, subY, subZ);
 
         return optres;
     }

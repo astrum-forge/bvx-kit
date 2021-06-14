@@ -74,7 +74,7 @@ export default class BitOps {
      * @returns - Returns true/false if the number is power of 2
      */
     public static isPowerOfTwo(value: number): boolean {
-        return value != 0 && (value & value - 1) == 0;
+        return value !== 0 && (value & value - 1) === 0;
     }
 
     /**
@@ -122,7 +122,7 @@ export default class BitOps {
      * @returns - Returns a 32 character string that represents the bit sequence
      */
     public static toBitString(value: number): string {
-        let str = '';
+        let str = "";
 
         for (let i: number = 31; i >= 0; i--) {
             str += BitOps.bitAt(value, i);
@@ -142,7 +142,9 @@ export default class BitOps {
         let value: number = 0;
 
         for (let i: number = readIndex, j: number = 31; i < 32; i++, j--) {
-            value = data[i] === '1' ? BitOps.setBitAt(value, j) : BitOps.unsetBitAt(value, j);
+            const dval: string = data[i];
+
+            value = dval === "1" ? BitOps.setBitAt(value, j) : BitOps.unsetBitAt(value, j);
         }
 
         return value;

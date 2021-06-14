@@ -74,11 +74,11 @@ export default class MortonKey {
     public static add(a: MortonKey, b: MortonKey, optres: MortonKey | null = null): MortonKey {
         optres = optres || new MortonKey();
 
-        const sum_x: number = (a._key | MortonKey.YZ3_MASK) + (b._key & MortonKey.X3_MASK);
-        const sum_y: number = (a._key | MortonKey.XZ3_MASK) + (b._key & MortonKey.Y3_MASK);
-        const sum_z: number = (a._key | MortonKey.XY3_MASK) + (b._key & MortonKey.Z3_MASK);
+        const sumX: number = (a._key | MortonKey.YZ3_MASK) + (b._key & MortonKey.X3_MASK);
+        const sumY: number = (a._key | MortonKey.XZ3_MASK) + (b._key & MortonKey.Y3_MASK);
+        const sumZ: number = (a._key | MortonKey.XY3_MASK) + (b._key & MortonKey.Z3_MASK);
 
-        optres._key = (sum_x & MortonKey.X3_MASK) | (sum_y & MortonKey.Y3_MASK) | (sum_z & MortonKey.Z3_MASK);
+        optres._key = (sumX & MortonKey.X3_MASK) | (sumY & MortonKey.Y3_MASK) | (sumZ & MortonKey.Z3_MASK);
 
         return optres;
     }
@@ -86,11 +86,11 @@ export default class MortonKey {
     public static sub(a: MortonKey, b: MortonKey, optres: MortonKey | null = null): MortonKey {
         optres = optres || new MortonKey();
 
-        const sub_x: number = (a._key & MortonKey.X3_MASK) - (b._key & MortonKey.X3_MASK);
-        const sub_y: number = (a._key & MortonKey.Y3_MASK) - (b._key & MortonKey.Y3_MASK);
-        const sub_z: number = (a._key & MortonKey.Z3_MASK) - (b._key & MortonKey.Z3_MASK);
+        const subX: number = (a._key & MortonKey.X3_MASK) - (b._key & MortonKey.X3_MASK);
+        const subY: number = (a._key & MortonKey.Y3_MASK) - (b._key & MortonKey.Y3_MASK);
+        const subZ: number = (a._key & MortonKey.Z3_MASK) - (b._key & MortonKey.Z3_MASK);
 
-        optres._key = (sub_x & MortonKey.X3_MASK) | (sub_y & MortonKey.Y3_MASK) | (sub_z & MortonKey.Z3_MASK);
+        optres._key = (subX & MortonKey.X3_MASK) | (subY & MortonKey.Y3_MASK) | (subZ & MortonKey.Z3_MASK);
 
         return optres;
     }
