@@ -147,4 +147,34 @@ export default class BitOps {
 
         return value;
     }
+
+    /**
+     * Perform a robust approximate equality test between two 32 bit
+     * floating point numbers. This is useful since floating point numbers
+     * cannot be directly compared due to precision loss.
+     * @param a - The first number to perform comparison against
+     * @param b - The second number to perform comparison against
+     * @returns - True/False if numbers are approximetly equal
+     */
+    public static isEqual(a: number, b: number): boolean {
+        // Shortcut, handles infinities
+        if (a === b) {
+            return true;
+        }
+
+        const diff: number = Math.abs(a - b);
+        const FLOAT_NORMAL: number = (1 << 23) * Number.EPSILON;
+
+        // a or b is zero, or both are extremely close to it.
+        // relative error is less meaningful here
+        if (a === 0.0 || b === 0.0 || diff < FLOAT_NORMAL) {
+            return diff < (FLOAT_NORMAL * 0.00001);
+        }
+
+        const absA: number = Math.abs(a);
+        const absB: number = Math.abs(b);
+
+        // use relative error
+        return diff < Math.min((absA + absB), Number.MAX_VALUE) * 0.00001;
+    }
 }
