@@ -1,5 +1,5 @@
 /**
- * Provides static utility functions for dealing with BitWise Arithmetics
+ * Provides static utility functions for dealing with useful BitWise Arithmetics
  */
 export default class BitOps {
 

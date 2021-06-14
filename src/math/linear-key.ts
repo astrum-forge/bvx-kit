@@ -8,7 +8,17 @@
  * y - min 0, max 1023
  * z - min 0, max 1023
  * 
- * See: https://en.wikipedia.org/wiki/Z-order_curve
+ * Values exceeding these tolerances will wrap around, for example
+ *
+ * 1024 becomes 0
+ * 1025 becomes 1
+ *
+ * Negative values will also wrap around, for example
+ * -1 becomes 1023
+ * -2 becomes 1022
+ * 
+ * This is slightly faster than MortonKeys at the expense of worse 
+ * cache-coherency
  */
 export default class LinearKey {
     public static readonly KEY_MASK: number = 0x3FF;
@@ -20,18 +30,6 @@ export default class LinearKey {
     }
 
     public static from(x: number, y: number, z: number, optres: LinearKey | null = null): LinearKey {
-        if (x >= 1024 || x < 0) {
-            throw new Error("LinearKey.from(x, y, z) - linear key x component must be between 0-1023 (10 bits), was " + x);
-        }
-
-        if (y >= 1024 || y < 0) {
-            throw new Error("LinearKey.from(x, y, z) - linear key y component must be between 0-1023 (10 bits), was " + y);
-        }
-
-        if (z >= 1024 || z < 0) {
-            throw new Error("LinearKey.from(x, y, z) - linear key z component must be between 0-1023 (10 bits), was " + z);
-        }
-
         optres = optres || new LinearKey();
 
         optres._key = LinearKey._Encode(x, y, z);
@@ -40,9 +38,11 @@ export default class LinearKey {
     }
 
     private static _Encode(x: number, y: number, z: number): number {
-        const cx: number = (x | 0) & LinearKey.KEY_MASK;
-        const cy: number = (y | 0) & LinearKey.KEY_MASK;
-        const cz: number = (z | 0) & LinearKey.KEY_MASK;
+        const mask: number = LinearKey.KEY_MASK;
+
+        const cx: number = (x | 0) & mask;
+        const cy: number = (y | 0) & mask;
+        const cz: number = (z | 0) & mask;
 
         return cx << 20 | cy << 10 | cz;
     }

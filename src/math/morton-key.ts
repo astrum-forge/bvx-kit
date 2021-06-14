@@ -8,9 +8,19 @@
  * y - min 0, max 1023
  * z - min 0, max 1023
  * 
+ * Values exceeding these tolerances will wrap around, for example
+ * 1024 becomes 0
+ * 1025 becomes 1
+ * 
+ * Negative values will also wrap around, for example
+ * -1 becomes 1023
+ * -2 becomes 1022
+ * 
  * See: https://en.wikipedia.org/wiki/Z-order_curve
  */
 export default class MortonKey {
+    public static readonly KEY_MASK: number = 0x3FF;
+
     public static readonly X3_MASK: number = 0x9249249;
     public static readonly Y3_MASK: number = 0x12492492;
     public static readonly Z3_MASK: number = 0x24924924;
@@ -26,23 +36,13 @@ export default class MortonKey {
     }
 
     public static from(x: number, y: number, z: number, optres: MortonKey | null = null): MortonKey {
-        if (x >= 1024 || x < 0) {
-            throw new Error("MortonKey.from(x, y, z) - morton key x component must be between 0-1023 (10 bits), was " + x);
-        }
-
-        if (y >= 1024 || y < 0) {
-            throw new Error("MortonKey.from(x, y, z) - morton key y component must be between 0-1023 (10 bits), was " + y);
-        }
-
-        if (z >= 1024 || z < 0) {
-            throw new Error("MortonKey.from(x, y, z) - morton key z component must be between 0-1023 (10 bits), was " + z);
-        }
-
         optres = optres || new MortonKey();
 
-        const cx: number = MortonKey._EncodePart(x);
-        const cy: number = MortonKey._EncodePart(y);
-        const cz: number = MortonKey._EncodePart(z);
+        const mask: number = MortonKey.KEY_MASK;
+
+        const cx: number = MortonKey._EncodePart(x & mask);
+        const cy: number = MortonKey._EncodePart(y & mask);
+        const cz: number = MortonKey._EncodePart(z & mask);
 
         optres._key = (cz << 2) + (cy << 1) + cx;
 

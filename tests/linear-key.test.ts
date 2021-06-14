@@ -53,23 +53,99 @@ describe('LinearKey', () => {
     });
 
     it('.from() - min values', () => {
-        expect(() => clazz.from(minX, minY, minZ)).not.toThrow(Error);
+        const key = clazz.from(minX, minY, minZ);
+
+        expect(key.x).toBe(minX);
+        expect(key.y).toBe(minY);
+        expect(key.z).toBe(minZ);
     });
 
     it('.from() - max values', () => {
-        expect(() => clazz.from(maxX, maxY, maxZ)).not.toThrow(Error);
+        const key = clazz.from(maxX, maxY, maxZ);
+
+        expect(key.x).toBe(maxX);
+        expect(key.y).toBe(maxY);
+        expect(key.z).toBe(maxZ);
     });
 
-    it('.from() - negative values', () => {
-        expect(() => clazz.from(minX - 1, minY, minZ)).toThrow(Error);
-        expect(() => clazz.from(minX, minY - 1, minZ)).toThrow(Error);
-        expect(() => clazz.from(minX, minY, minZ - 1)).toThrow(Error);
+    it('.from() - underflow values', () => {
+        const key = clazz.from(minX - 1, minY, minZ);
+
+        expect(key.x).toBe(maxX);
+        expect(key.y).toBe(minY);
+        expect(key.z).toBe(minZ);
+
+        const key2 = clazz.from(minX, minY - 1, minZ);
+
+        expect(key2.x).toBe(minX);
+        expect(key2.y).toBe(maxY);
+        expect(key2.z).toBe(minZ);
+
+        const key3 = clazz.from(minX, minY, minZ - 1);
+
+        expect(key3.x).toBe(minX);
+        expect(key3.y).toBe(minY);
+        expect(key3.z).toBe(maxZ);
+    });
+
+    it('.from() - underflow wrap values', () => {
+        const key = clazz.from(minX - 4, minY, minZ);
+
+        expect(key.x).toBe(maxX - 3);
+        expect(key.y).toBe(minY);
+        expect(key.z).toBe(minZ);
+
+        const key2 = clazz.from(minX, minY - 4, minZ);
+
+        expect(key2.x).toBe(minX);
+        expect(key2.y).toBe(maxY - 3);
+        expect(key2.z).toBe(minZ);
+
+        const key3 = clazz.from(minX, minY, minZ - 4);
+
+        expect(key3.x).toBe(minX);
+        expect(key3.y).toBe(minY);
+        expect(key3.z).toBe(maxZ - 3);
     });
 
     it('.from() - overflow values', () => {
-        expect(() => clazz.from(maxX + 1, maxY, maxZ)).toThrow(Error);
-        expect(() => clazz.from(maxX, maxY + 1, maxZ)).toThrow(Error);
-        expect(() => clazz.from(maxX, maxY, maxZ + 1)).toThrow(Error);
+        const key = clazz.from(maxX + 1, maxY, maxZ);
+
+        expect(key.x).toBe(minX);
+        expect(key.y).toBe(maxY);
+        expect(key.z).toBe(maxZ);
+
+        const key2 = clazz.from(maxX, maxY + 1, maxZ);
+
+        expect(key2.x).toBe(maxX);
+        expect(key2.y).toBe(minY);
+        expect(key2.z).toBe(maxZ);
+
+        const key3 = clazz.from(maxX, maxY, maxZ + 1);
+
+        expect(key3.x).toBe(maxX);
+        expect(key3.y).toBe(maxY);
+        expect(key3.z).toBe(minZ);
+    });
+
+    it('.from() - overflow wrap values', () => {
+        const key = clazz.from(maxX + 4, maxY, maxZ);
+
+        expect(key.x).toBe(minX + 3);
+        expect(key.y).toBe(maxY);
+        expect(key.z).toBe(maxZ);
+
+        const key2 = clazz.from(maxX, maxY + 4, maxZ);
+
+        expect(key2.x).toBe(maxX);
+        expect(key2.y).toBe(minY + 3);
+        expect(key2.z).toBe(maxZ);
+
+        const key3 = clazz.from(maxX, maxY, maxZ + 4);
+
+        expect(key3.x).toBe(maxX);
+        expect(key3.y).toBe(maxY);
+        expect(key3.z).toBe(minZ + 3);
     });
 
     it('.from(0, 0, 0) - x, y, z values', () => {
