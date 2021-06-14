@@ -2,6 +2,7 @@
  * Provides static utility functions for dealing with useful BitWise Arithmetics
  */
 export default class BitOps {
+    private static readonly FLOAT_NORMAL: number = (1 << 23) * Number.EPSILON;
 
     /**
      * Reads and returns the bit at provided position.
@@ -140,12 +141,12 @@ export default class BitOps {
         }
 
         const diff: number = Math.abs(a - b);
-        const FLOAT_NORMAL: number = (1 << 23) * Number.EPSILON;
+        const normal: number = BitOps.FLOAT_NORMAL;
 
         // a or b is zero, or both are extremely close to it.
         // relative error is less meaningful here
-        if (a === 0.0 || b === 0.0 || diff < FLOAT_NORMAL) {
-            return diff < (FLOAT_NORMAL * 0.00001);
+        if (a === 0.0 || b === 0.0 || diff < normal) {
+            return diff < (normal * 0.00001);
         }
 
         const absA: number = Math.abs(a);
