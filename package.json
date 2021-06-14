@@ -5,9 +5,10 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
+    "test:ci": "jest --ci --runInBand --coverage",
     "test": "jest",
     "coverage": "jest --coverage",
-    "clean": "rm -rf dist node_modules",
+    "clean": "rm -rf dist node_modules coverage",
     "build-ts": "rm -rf dist && tsc --noEmitOnError",
     "build": "npm run build-ts",
     "watch": "watch 'npm run build' ./src"
