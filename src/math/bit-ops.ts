@@ -91,31 +91,6 @@ export default class BitOps {
     }
 
     /**
-     * Reads a byte (8 bits) of information starting from the provided byte position.
-     * @param data - The data to read from
-     * @param pos - The byte position to read from ranging from 0 to 3
-     * @returns - Returns the read 8 bit data
-     */
-    public static byteAt(data: number, pos: number): number {
-        return data >> (24 - (pos * 8));
-    }
-
-    /**
-     * Writes a byte (8 bits) of information starting from the provided byte position. 
-     * This preserves the rest of the data.
-     * @param data - The data to write into
-     * @param newData - The byte (8 bits) of data to write
-     * @param pos - The byte position to write ranging from 0 to 3
-     * @returns - Returns the new modified 32 bit number with the new written data
-     */
-    public static setByteAt(data: number, newData: number, pos: number): number {
-        const shift: number = 24 - (pos * 8);
-        const mask: number = 0xFF << shift;
-
-        return (data & ~mask) | ((newData << shift) & mask);
-    }
-
-    /**
      * Provided a 32 bit number, encode the bits into a string and return.
      * This is mostly used for debugging purposes.
      * @param value - The 32 bit number to encode into a string
