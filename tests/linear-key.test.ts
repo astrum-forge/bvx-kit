@@ -218,6 +218,22 @@ describe('LinearKey', () => {
     /**
      * TESTS for .incX() - increment coordinates by one at a time
      */
+    it('.incX() - class fn', () => {
+        const key = clazz.from(randomX, randomY, randomZ);
+
+        const newKey = clazz.incX(key);
+
+        expect(key.x).not.toBe(newKey.x);
+        expect(key.y).toBe(newKey.y);
+        expect(key.z).toBe(newKey.z);
+
+        const newKey2 = clazz.incX(key, new clazz());
+
+        expect(key.x).not.toBe(newKey2.x);
+        expect(key.y).toBe(newKey2.y);
+        expect(key.z).toBe(newKey2.z);
+    });
+
     it('.incX() - min value', () => {
         const key = clazz.from(minX, randomY, randomZ);
 
@@ -261,6 +277,22 @@ describe('LinearKey', () => {
     /**
      * TESTS for .decX() - decrement coordinates by one at a time
      */
+    it('.decX() - class fn', () => {
+        const key = clazz.from(randomX, randomY, randomZ);
+
+        const newKey = clazz.decX(key);
+
+        expect(key.x).not.toBe(newKey.x);
+        expect(key.y).toBe(newKey.y);
+        expect(key.z).toBe(newKey.z);
+
+        const newKey2 = clazz.decX(key, new clazz());
+
+        expect(key.x).not.toBe(newKey2.x);
+        expect(key.y).toBe(newKey2.y);
+        expect(key.z).toBe(newKey2.z);
+    });
+
     it('.decX() - min value', () => {
         const key = clazz.from(minX + 1, randomY, randomZ);
 
@@ -304,6 +336,22 @@ describe('LinearKey', () => {
     /**
      * TESTS for .incY() - increment coordinates by one at a time
      */
+    it('.incY() - class fn', () => {
+        const key = clazz.from(randomX, randomY, randomZ);
+
+        const newKey = clazz.incY(key);
+
+        expect(key.x).toBe(newKey.x);
+        expect(key.y).not.toBe(newKey.y);
+        expect(key.z).toBe(newKey.z);
+
+        const newKey2 = clazz.incY(key, new clazz());
+
+        expect(key.x).toBe(newKey2.x);
+        expect(key.y).not.toBe(newKey2.y);
+        expect(key.z).toBe(newKey2.z);
+    });
+
     it('.incY() - min value', () => {
         const key = clazz.from(randomX, minY, randomZ);
 
@@ -347,6 +395,22 @@ describe('LinearKey', () => {
     /**
      * TESTS for .decY() - decrement coordinates by one at a time
      */
+    it('.decY() - class fn', () => {
+        const key = clazz.from(randomX, randomY, randomZ);
+
+        const newKey = clazz.decY(key);
+
+        expect(key.x).toBe(newKey.x);
+        expect(key.y).not.toBe(newKey.y);
+        expect(key.z).toBe(newKey.z);
+
+        const newKey2 = clazz.decY(key, new clazz());
+
+        expect(key.x).toBe(newKey2.x);
+        expect(key.y).not.toBe(newKey2.y);
+        expect(key.z).toBe(newKey2.z);
+    });
+
     it('.decY() - min value', () => {
         const key = clazz.from(randomX, minY + 1, randomZ);
 
@@ -390,6 +454,22 @@ describe('LinearKey', () => {
     /**
      * TESTS for .incZ() - increment coordinates by one at a time
      */
+    it('.incZ() - class fn', () => {
+        const key = clazz.from(randomX, randomY, randomZ);
+
+        const newKey = clazz.incZ(key);
+
+        expect(key.x).toBe(newKey.x);
+        expect(key.y).toBe(newKey.y);
+        expect(key.z).not.toBe(newKey.z);
+
+        const newKey2 = clazz.incZ(key, new clazz());
+
+        expect(key.x).toBe(newKey2.x);
+        expect(key.y).toBe(newKey2.y);
+        expect(key.z).not.toBe(newKey2.z);
+    });
+
     it('.incZ() - min value', () => {
         const key = clazz.from(randomX, randomY, minZ);
 
@@ -433,6 +513,22 @@ describe('LinearKey', () => {
     /**
      * TESTS for .decZ() - decrement coordinates by one at a time
      */
+    it('.decZ() - class fn', () => {
+        const key = clazz.from(randomX, randomY, randomZ);
+
+        const newKey = clazz.decZ(key);
+
+        expect(key.x).toBe(newKey.x);
+        expect(key.y).toBe(newKey.y);
+        expect(key.z).not.toBe(newKey.z);
+
+        const newKey2 = clazz.decZ(key, new clazz());
+
+        expect(key.x).toBe(newKey2.x);
+        expect(key.y).toBe(newKey2.y);
+        expect(key.z).not.toBe(newKey2.z);
+    });
+
     it('.decZ() - min value', () => {
         const key = clazz.from(randomX, randomY, minZ + 1);
 
@@ -509,6 +605,23 @@ describe('LinearKey', () => {
         expect(key.z).toBe(maxZ);
     });
 
+    it('.add() - class key addition', () => {
+        const key1 = clazz.from(randomX, randomY, randomZ);
+        const key2 = clazz.from(randomZ, randomX, randomY);
+
+        const add = clazz.add(key1, key2, new clazz());
+
+        expect(add.x).toBe(randomX + randomZ);
+        expect(add.y).toBe(randomY + randomX);
+        expect(add.z).toBe(randomZ + randomY);
+
+        const add2 = clazz.add(key1, key2);
+
+        expect(add2.x).toBe(randomX + randomZ);
+        expect(add2.y).toBe(randomY + randomX);
+        expect(add2.z).toBe(randomZ + randomY);
+    });
+
     it('.add() - key addition - independent', () => {
         const key1 = clazz.from(randomX, randomY, randomZ);
         const key2 = clazz.from(randomZ, randomX, randomY);
@@ -533,6 +646,23 @@ describe('LinearKey', () => {
         expect(add.x).toBe(key1.x);
         expect(add.y).toBe(key1.y);
         expect(add.z).toBe(key1.z);
+    });
+
+    it('.sub() - class key subtraction', () => {
+        const key1 = clazz.from(maxX, maxY, maxZ);
+        const key2 = clazz.from(randomX, randomY, randomZ);
+
+        const add = clazz.sub(key1, key2, new clazz());
+
+        expect(add.x).toBe(maxX - randomX);
+        expect(add.y).toBe(maxY - randomY);
+        expect(add.z).toBe(maxZ - randomZ);
+
+        const add2 = clazz.sub(key1, key2);
+
+        expect(add2.x).toBe(maxX - randomX);
+        expect(add2.y).toBe(maxY - randomY);
+        expect(add2.z).toBe(maxZ - randomZ);
     });
 
     it('.sub() - key subtraction - independent', () => {
