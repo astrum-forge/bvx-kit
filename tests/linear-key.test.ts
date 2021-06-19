@@ -1,4 +1,5 @@
 import LinearKey from '../src/math/linear-key';
+import MortonKey from '../src/math/morton-key';
 
 /**
  * Provides 100% Coverage for linear-key.ts
@@ -50,6 +51,14 @@ describe('LinearKey', () => {
         expect(key.cmp(key)).toBe(true);
         expect(key2.cmp(key2)).toBe(true);
         expect(key3.cmp(key3)).toBe(true);
+    });
+
+    it('.cmp() - comparison check against another key', () => {
+        const key = clazz.from(randomX, randomY, randomZ);
+        const key2 = MortonKey.from(randomX, randomY, randomZ);
+
+        expect(key.cmp(key2)).toBe(true);
+        expect(key2.cmp(key)).toBe(true);
     });
 
     it('.from() - min values', () => {
