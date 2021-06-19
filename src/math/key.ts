@@ -14,4 +14,5 @@ export interface Key {
     get key(): number;
 
     cmp(other: Key): boolean;
+    clone(): Key;
 }

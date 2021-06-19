@@ -197,6 +197,10 @@ export default class LinearKey implements Key {
         return optres;
     }
 
+    public clone(): LinearKey {
+        return new LinearKey(this._key);
+    }
+
     public cmp(other: Key): boolean {
         if (other instanceof LinearKey) {
             return this._key === other.key;
