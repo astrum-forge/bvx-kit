@@ -1,4 +1,4 @@
-import BitOps from '../src/math/bit-ops';
+import BitOps from '../src/util/bit-ops';
 
 /**
  * Provides 100% Coverage for bit-ops.ts
