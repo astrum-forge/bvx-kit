@@ -1,3 +1,5 @@
+import { Key } from "./key";
+
 /**
  * Implementation for 32 bit 3D LinearKey compact keys.
  * 
@@ -20,7 +22,7 @@
  * This is slightly faster than MortonKeys at the expense of worse 
  * cache-coherency
  */
-export default class LinearKey {
+export default class LinearKey implements Key {
     public static readonly KEY_MASK: number = 0x3FF;
 
     private _key: number = 0;

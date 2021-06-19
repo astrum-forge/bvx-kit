@@ -1,3 +1,5 @@
+import { Key } from "./key";
+
 /**
  * Implementation for 32 bit 3D MortonKey (Z-order curve) keys.
  * 
@@ -18,7 +20,7 @@
  * 
  * See: https://en.wikipedia.org/wiki/Z-order_curve
  */
-export default class MortonKey {
+export default class MortonKey implements Key {
     public static readonly KEY_MASK: number = 0x3FF;
 
     public static readonly X3_MASK: number = 0x9249249;
