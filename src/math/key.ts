@@ -1,3 +1,6 @@
+/**
+ * Generic Key interface that provides access to x,y,z coordinates
+ */
 export interface Key {
     get x(): number;
     set x(value: number);
@@ -9,4 +12,6 @@ export interface Key {
     set z(value: number);
 
     get key(): number;
+
+    cmp(other: Key): boolean;
 }

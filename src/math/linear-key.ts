@@ -197,7 +197,11 @@ export default class LinearKey implements Key {
         return optres;
     }
 
-    public cmp(other: LinearKey): boolean {
-        return this._key === other._key;
+    public cmp(other: Key): boolean {
+        if (other instanceof LinearKey) {
+            return this._key === other.key;
+        }
+
+        return this.x === other.x && this.y === other.y && this.z === other.z;
     }
 }

@@ -233,7 +233,11 @@ export default class MortonKey implements Key {
         return optres;
     }
 
-    public cmp(other: MortonKey): boolean {
-        return this._key === other._key;
+    public cmp(other: Key): boolean {
+        if (other instanceof MortonKey) {
+            return this._key === other.key;
+        }
+
+        return this.x === other.x && this.y === other.y && this.z === other.z;
     }
 }
