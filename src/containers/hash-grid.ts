@@ -1,7 +1,7 @@
 import { Key } from "../math/key";
 
 /**
- * Internal node for managing the FastDict structure. contains
+ * Internal node for managing the HashGrid structure. contains
  * read-only key-value pairs.
  */
 class Node<K extends Key, V> {
@@ -16,11 +16,11 @@ class Node<K extends Key, V> {
 }
 
 /**
- * FastDict contains a set of key-value pairs with a constant length of buckets
+ * HashGrid contains a set of key-value pairs with a constant length of buckets
  * designed to work with the Key structure. Specifically, MortonKey provides an excellent
  * distribution of 3D data for fast access.
  */
-export class FastDict<K extends Key, V> {
+export class HashGrid<K extends Key, V> {
 
     private readonly _dict: Array<Array<Node<K, V>>>;
     private readonly _size: number;
@@ -31,15 +31,21 @@ export class FastDict<K extends Key, V> {
     }
 
     /**
+     * Internal function that calculates and return an appropriate bucket for the provided key
+     */
+    private _GetKeyBucket(key: K): Array<Node<K, V>> | undefined | null {
+        return this._dict[key.key % this._size];
+    }
+
+    /**
      * Given a key, search and return the Node Reference attached to the key
      * This is meant to be used internally only as Node should not be exposed
      * externally.
      * @param key - Key to use for search
      * @returns - Node Reference if found or null
      */
-    private _get(key: K): Node<K, V> | null {
-        const bucketKey: number = key.key % this._size;
-        const bucket: Array<Node<K, V>> | undefined | null = this._dict[bucketKey];
+    private _Get(key: K): Node<K, V> | null {
+        const bucket: Array<Node<K, V>> | undefined | null = this._GetKeyBucket(key);
 
         if (bucket) {
             // NOTE - This should be optimised from O(n) to O(log(n))
@@ -66,8 +72,8 @@ export class FastDict<K extends Key, V> {
      * @param key - Key to use for search
      * @returns - Value if found or null
      */
-    public get(key: K): V | null {
-        const node: Node<K, V> | null = this._get(key);
+    public getValue(key: K): V | null {
+        const node: Node<K, V> | null = this._Get(key);
 
         if (node) {
             return node.value;
@@ -82,8 +88,8 @@ export class FastDict<K extends Key, V> {
      * @param key - The key to use
      * @param value - The value to set
      */
-    public set(key: K, value: V): void {
-        const node: Node<K, V> | null = this._get(key);
+    public setValue(key: K, value: V): void {
+        const node: Node<K, V> | null = this._Get(key);
 
         // first time inserting this object
         if (!node) {
@@ -103,5 +109,30 @@ export class FastDict<K extends Key, V> {
         }
 
         node.value = value;
+    }
+
+    /**
+     * Deletes the entry for the provided key if it exists
+     * @param key - The key to use for removal
+     * @returns - Returns true if a value was removed, false otherwise
+     */
+    public remove(key: K): boolean {
+        const node: Node<K, V> | null = this._Get(key);
+
+        if (node) {
+            const bucket: Array<Node<K, V>> | undefined | null = this._GetKeyBucket(key);
+
+            // this should always be true
+            if (bucket) {
+                const index: number = bucket.indexOf(node);
+
+                // remove the item, this should always pass
+                if (index > -1) {
+                    bucket.splice(index, 1);
+                }
+            }
+        }
+
+        return false;
     }
 }
