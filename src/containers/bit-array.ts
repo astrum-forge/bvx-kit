@@ -24,11 +24,19 @@ export default class BitArray {
         return this._array;
     }
 
+    public get length(): number {
+        return this._array.length;
+    }
+
     public bitAt(pos: number): number {
+        if (pos < 0) {
+            throw new Error("BitArray.bitAt(number) - bit position cannot be negative " + pos);
+        }
+
         const arr: Uint32Array = this._array;
         const index: number = (pos / BitArray.BITS_PER_ELEMENT) | 0;
 
-        if (index > arr.length) {
+        if (index >= arr.length) {
             throw new Error("BitArray.bitAt(number) - computed index " + index + " cannot be greater than length " + arr.length);
         }
 
@@ -38,10 +46,14 @@ export default class BitArray {
     }
 
     public bitInvAt(pos: number): number {
+        if (pos < 0) {
+            throw new Error("BitArray.bitInvAt(number) - bit position cannot be negative " + pos);
+        }
+
         const arr: Uint32Array = this._array;
         const index: number = (pos / BitArray.BITS_PER_ELEMENT) | 0;
 
-        if (index > arr.length) {
+        if (index >= arr.length) {
             throw new Error("BitArray.bitInvAt(number) - computed index " + index + " cannot be greater than length " + arr.length);
         }
 
@@ -51,10 +63,14 @@ export default class BitArray {
     }
 
     public setBitAt(pos: number): void {
+        if (pos < 0) {
+            throw new Error("BitArray.setBitAt(number) - bit position cannot be negative " + pos);
+        }
+
         const arr: Uint32Array = this._array;
         const index: number = (pos / BitArray.BITS_PER_ELEMENT) | 0;
 
-        if (index > arr.length) {
+        if (index >= arr.length) {
             throw new Error("BitArray.setBitAt(number) - computed index " + index + " cannot be greater than length " + arr.length);
         }
 
@@ -64,11 +80,15 @@ export default class BitArray {
     }
 
     public setBit(pos: number, bitValue: number): void {
+        if (pos < 0) {
+            throw new Error("BitArray.setBit(number, number) - bit position cannot be negative " + pos);
+        }
+
         const arr: Uint32Array = this._array;
         const index: number = (pos / BitArray.BITS_PER_ELEMENT) | 0;
 
-        if (index > arr.length) {
-            throw new Error("BitArray.setBit(number) - computed index " + index + " cannot be greater than length " + arr.length);
+        if (index >= arr.length) {
+            throw new Error("BitArray.setBit(number, number) - computed index " + index + " cannot be greater than length " + arr.length);
         }
 
         const value: number = arr[index];
@@ -77,10 +97,14 @@ export default class BitArray {
     }
 
     public unsetBitAt(pos: number): void {
+        if (pos < 0) {
+            throw new Error("BitArray.unsetBitAt(number) - bit position cannot be negative " + pos);
+        }
+
         const arr: Uint32Array = this._array;
         const index: number = (pos / BitArray.BITS_PER_ELEMENT) | 0;
 
-        if (index > arr.length) {
+        if (index >= arr.length) {
             throw new Error("BitArray.unsetBitAt(number) - computed index " + index + " cannot be greater than length " + arr.length);
         }
 
@@ -90,10 +114,14 @@ export default class BitArray {
     }
 
     public toggleBitAt(pos: number): void {
+        if (pos < 0) {
+            throw new Error("BitArray.toggleBitAt(number) - bit position cannot be negative " + pos);
+        }
+
         const arr: Uint32Array = this._array;
         const index: number = (pos / BitArray.BITS_PER_ELEMENT) | 0;
 
-        if (index > arr.length) {
+        if (index >= arr.length) {
             throw new Error("BitArray.toggleBitAt(number) - computed index " + index + " cannot be greater than length " + arr.length);
         }
 
