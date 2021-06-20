@@ -35,6 +35,16 @@ describe('LinearKey', () => {
         expect(key.z).toBe(key2.z);
     });
 
+    it('.clone() - copy equality', () => {
+        const key = clazz.from(randomX, randomY, randomZ);
+
+        const key2 = key.clone();
+
+        expect(key.x).toBe(key2.x);
+        expect(key.y).toBe(key2.y);
+        expect(key.z).toBe(key2.z);
+    });
+
     it('.cmp() - comparison check', () => {
         const key = clazz.from(randomX, randomY, randomZ);
         const key2 = clazz.from(randomX, randomY, randomZ);
