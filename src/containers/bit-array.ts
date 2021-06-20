@@ -1,4 +1,4 @@
-import BitOps from "./bit-ops";
+import BitOps from "../util/bit-ops";
 
 /**
  * Uint32Array backed Bit Array, allowing reading and writing of individual
