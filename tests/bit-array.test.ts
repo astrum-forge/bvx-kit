@@ -10,11 +10,13 @@ describe('BitArray', () => {
     const LOOP_COUNT: number = 32;
 
     it('.constructor() - minimum size', () => {
+        const bitsd = new BitArray();
         const bits0 = new BitArray(0);
         const bitsn = new BitArray(-1);
         const bits1 = new BitArray(1);
         const bits2 = new BitArray(2);
 
+        expect(bitsd.length).toBe(1);
         expect(bits0.length).toBe(1);
         expect(bitsn.length).toBe(1);
         expect(bits1.length).toBe(1);
