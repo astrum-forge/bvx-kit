@@ -44,7 +44,7 @@ export default class HashGrid<K extends Key, V> {
     private _GetKeyBucket(key: K): Array<Node<K, V>> | null {
         const value: Array<Node<K, V>> | null | undefined = this._dict[key.key % this._size];
 
-        return value !== null && value !== undefined ? value : null;
+        return value ? value : null;
     }
 
     /**
@@ -67,7 +67,7 @@ export default class HashGrid<K extends Key, V> {
                 const node: Node<K, V> | undefined | null = bucket[i];
 
                 // we found our object, return and terminate
-                if (node !== null && node !== undefined && node.key.cmp(key)) {
+                if (node && node.key.cmp(key)) {
                     return node;
                 }
             }
@@ -107,7 +107,7 @@ export default class HashGrid<K extends Key, V> {
             const bucket: Array<Node<K, V>> | undefined | null = this._dict[bucketKey];
 
             // bucket exists, just append
-            if (bucket !== null && bucket !== undefined) {
+            if (bucket) {
                 bucket.push(new Node<K, V>(key, value));
             }
             else {
