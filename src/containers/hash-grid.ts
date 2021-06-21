@@ -20,21 +20,31 @@ class Node<K extends Key, V> {
  * designed to work with the Key structure. Specifically, MortonKey provides an excellent
  * distribution of 3D data for fast access.
  */
-export class HashGrid<K extends Key, V> {
+export default class HashGrid<K extends Key, V> {
+    public static readonly DEFAULT_SIZE: number = 1024;
 
     private readonly _dict: Array<Array<Node<K, V>>>;
     private readonly _size: number;
 
-    constructor(buckets: number = 1024) {
-        this._size = buckets > 0 ? buckets : 1024;
+    constructor(buckets: number = HashGrid.DEFAULT_SIZE) {
+        this._size = buckets > 0 ? buckets : HashGrid.DEFAULT_SIZE;
         this._dict = new Array<Array<Node<K, V>>>(this._size);
+    }
+
+    /**
+     * Returns the number of Hash Buckets
+     */
+    public get size(): number {
+        return this._size;
     }
 
     /**
      * Internal function that calculates and return an appropriate bucket for the provided key
      */
-    private _GetKeyBucket(key: K): Array<Node<K, V>> | undefined | null {
-        return this._dict[key.key % this._size];
+    private _GetKeyBucket(key: K): Array<Node<K, V>> | null {
+        const value: Array<Node<K, V>> | null | undefined = this._dict[key.key % this._size];
+
+        return value !== null && value !== undefined ? value : null;
     }
 
     /**
@@ -45,9 +55,9 @@ export class HashGrid<K extends Key, V> {
      * @returns - Node Reference if found or null
      */
     private _Get(key: K): Node<K, V> | null {
-        const bucket: Array<Node<K, V>> | undefined | null = this._GetKeyBucket(key);
+        const bucket: Array<Node<K, V>> | null = this._GetKeyBucket(key);
 
-        if (bucket) {
+        if (bucket !== null) {
             // NOTE - This should be optimised from O(n) to O(log(n))
             // This can be done by ensuring that data is sorted (can do that during insert)
             // see set() method
@@ -57,7 +67,7 @@ export class HashGrid<K extends Key, V> {
                 const node: Node<K, V> | undefined | null = bucket[i];
 
                 // we found our object, return and terminate
-                if (node && node.key.cmp(key)) {
+                if (node !== null && node !== undefined && node.key.cmp(key)) {
                     return node;
                 }
             }
@@ -72,10 +82,10 @@ export class HashGrid<K extends Key, V> {
      * @param key - Key to use for search
      * @returns - Value if found or null
      */
-    public getValue(key: K): V | null {
+    public get(key: K): V | null {
         const node: Node<K, V> | null = this._Get(key);
 
-        if (node) {
+        if (node !== null) {
             return node.value;
         }
 
@@ -88,27 +98,26 @@ export class HashGrid<K extends Key, V> {
      * @param key - The key to use
      * @param value - The value to set
      */
-    public setValue(key: K, value: V): void {
+    public set(key: K, value: V): void {
         const node: Node<K, V> | null = this._Get(key);
 
         // first time inserting this object
-        if (!node) {
+        if (node === null) {
             const bucketKey: number = key.key % this._size;
             const bucket: Array<Node<K, V>> | undefined | null = this._dict[bucketKey];
 
             // bucket exists, just append
-            if (bucket) {
+            if (bucket !== null && bucket !== undefined) {
                 bucket.push(new Node<K, V>(key, value));
             }
             else {
                 // otherwise, initialise a new bucket with our requested node
                 this._dict[bucketKey] = new Array<Node<K, V>>(new Node<K, V>(key, value));
             }
-
-            return;
         }
-
-        node.value = value;
+        else {
+            node.value = value;
+        }
     }
 
     /**
@@ -119,18 +128,16 @@ export class HashGrid<K extends Key, V> {
     public remove(key: K): boolean {
         const node: Node<K, V> | null = this._Get(key);
 
-        if (node) {
-            const bucket: Array<Node<K, V>> | undefined | null = this._GetKeyBucket(key);
+        if (node !== null) {
+            // if statements here will never execute, so we never need them
+            // @ts-ignore
+            const bucket: Array<Node<K, V>> = this._GetKeyBucket(key);
+            const index: number = bucket.indexOf(node);
 
-            // this should always be true
-            if (bucket) {
-                const index: number = bucket.indexOf(node);
+            // remove the item
+            bucket.splice(index, 1);
 
-                // remove the item, this should always pass
-                if (index > -1) {
-                    bucket.splice(index, 1);
-                }
-            }
+            return true;
         }
 
         return false;

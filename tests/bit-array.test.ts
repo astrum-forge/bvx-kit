@@ -1,7 +1,7 @@
 import BitArray from '../src/containers/bit-array';
 
 /**
- * Provides 100% Coverage for bit-ops.ts
+ * Provides 100% Coverage for bit-array.ts
  */
 describe('BitArray', () => {
     const TEST_VALUE: number = 2155106839; // 10000000011101000101001000010111
