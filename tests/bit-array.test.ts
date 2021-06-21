@@ -103,4 +103,103 @@ describe('BitArray', () => {
 
         expect(() => bits.bitInvAt(-1)).toThrow(Error);
     });
+
+    it('.setBitAt() - check bit correctness', () => {
+        const bits = new BitArray(2);
+
+        for (let i: number = 0; i < LOOP_COUNT * 2; i++) {
+            expect(bits.bitAt(i)).toBe(0);
+            bits.setBitAt(i)
+            expect(bits.bitAt(i)).toBe(1);
+        }
+    });
+
+    it('.setBitAt() - overflow access must throw error', () => {
+        const bits = new BitArray(2);
+
+        expect(() => bits.setBitAt(0)).not.toThrow(Error);
+        expect(() => bits.setBitAt((LOOP_COUNT * 2) - 1)).not.toThrow(Error);
+        expect(() => bits.setBitAt(LOOP_COUNT * 2)).toThrow(Error);
+    });
+
+    it('.setBitAt() - underflow access must throw error', () => {
+        const bits = new BitArray(2);
+
+        expect(() => bits.setBitAt(-1)).toThrow(Error);
+    });
+
+    it('.setBit() - check bit correctness', () => {
+        const bits = new BitArray(2);
+
+        for (let i: number = 0; i < LOOP_COUNT * 2; i++) {
+            bits.setBit(i, 1)
+            expect(bits.bitAt(i)).toBe(1);
+            bits.setBit(i, 0)
+            expect(bits.bitAt(i)).toBe(0);
+        }
+    });
+
+    it('.setBit() - overflow access must throw error', () => {
+        const bits = new BitArray(2);
+
+        expect(() => bits.setBit(0, 0)).not.toThrow(Error);
+        expect(() => bits.setBit((LOOP_COUNT * 2) - 1, 0)).not.toThrow(Error);
+        expect(() => bits.setBit(LOOP_COUNT * 2, 0)).toThrow(Error);
+    });
+
+    it('.setBit() - underflow access must throw error', () => {
+        const bits = new BitArray(2);
+
+        expect(() => bits.setBit(-1, 0)).toThrow(Error);
+    });
+
+    it('.unsetBitAt() - check bit correctness', () => {
+        const bits = new BitArray(2);
+
+        for (let i: number = 0; i < LOOP_COUNT * 2; i++) {
+            bits.setBitAt(i)
+            expect(bits.bitAt(i)).toBe(1);
+            bits.unsetBitAt(i)
+            expect(bits.bitAt(i)).toBe(0);
+        }
+    });
+
+    it('.unsetBitAt() - overflow access must throw error', () => {
+        const bits = new BitArray(2);
+
+        expect(() => bits.unsetBitAt(0)).not.toThrow(Error);
+        expect(() => bits.unsetBitAt((LOOP_COUNT * 2) - 1)).not.toThrow(Error);
+        expect(() => bits.unsetBitAt(LOOP_COUNT * 2)).toThrow(Error);
+    });
+
+    it('.unsetBitAt() - underflow access must throw error', () => {
+        const bits = new BitArray(2);
+
+        expect(() => bits.unsetBitAt(-1)).toThrow(Error);
+    });
+
+    it('.toggleBitAt() - check bit correctness', () => {
+        const bits = new BitArray(2);
+
+        for (let i: number = 0; i < LOOP_COUNT * 2; i++) {
+            bits.toggleBitAt(i)
+            expect(bits.bitAt(i)).toBe(1);
+            bits.toggleBitAt(i)
+            expect(bits.bitAt(i)).toBe(0);
+        }
+    });
+
+    it('.toggleBitAt() - overflow access must throw error', () => {
+        const bits = new BitArray(2);
+
+        expect(() => bits.toggleBitAt(0)).not.toThrow(Error);
+        expect(() => bits.toggleBitAt((LOOP_COUNT * 2) - 1)).not.toThrow(Error);
+        expect(() => bits.toggleBitAt(LOOP_COUNT * 2)).toThrow(Error);
+    });
+
+    it('.toggleBitAt() - underflow access must throw error', () => {
+        const bits = new BitArray(2);
+
+        expect(() => bits.toggleBitAt(-1)).toThrow(Error);
+    });
 });
