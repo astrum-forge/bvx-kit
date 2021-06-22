@@ -20,7 +20,7 @@ import { Key } from "./key";
  * 
  * See: https://en.wikipedia.org/wiki/Z-order_curve
  */
-export default class MortonKey implements Key {
+export class MortonKey implements Key {
     public static readonly KEY_MASK: number = 0x3FF;
 
     public static readonly X3_MASK: number = 0x9249249;

@@ -1,4 +1,4 @@
-import BitArray from '../src/containers/bit-array';
+import { BitArray } from '../src/containers/bit-array';
 
 /**
  * Provides 100% Coverage for bit-array.ts

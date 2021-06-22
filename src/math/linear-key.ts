@@ -22,7 +22,7 @@ import { Key } from "./key";
  * This is slightly faster than MortonKeys at the expense of worse 
  * cache-coherency
  */
-export default class LinearKey implements Key {
+export class LinearKey implements Key {
     public static readonly KEY_MASK: number = 0x3FF;
 
     private _key: number = 0;

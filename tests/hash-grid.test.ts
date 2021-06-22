@@ -1,6 +1,6 @@
-import HashGrid from '../src/containers/hash-grid';
-import MortonKey from '../src/math/morton-key';
-import LinearKey from '../src/math/linear-key';
+import { HashGrid } from '../src/containers/hash-grid';
+import { MortonKey } from '../src/math/morton-key';
+import { LinearKey } from '../src/math/linear-key';
 
 /**
  * Provides 100% Coverage for hash-grid.ts

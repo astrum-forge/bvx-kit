@@ -1,7 +1,7 @@
 /**
  * Provides static utility functions for dealing with useful BitWise Arithmetics
  */
-export default class BitOps {
+export class BitOps {
     private static readonly FLOAT_NORMAL: number = (1 << 23) * Number.EPSILON;
 
     /**

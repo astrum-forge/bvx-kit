@@ -1,11 +1,11 @@
-import BitOps from "../util/bit-ops";
+import { BitOps } from "../util/bit-ops";
 
 /**
  * Uint32Array backed Bit Array, allowing reading and writing of individual
  * bits of data
  */
-export default class BitArray {
-    public static readonly BITS_PER_ELEMENT = 32;
+export class BitArray {
+    public static readonly BITS_PER_ELEMENT: number = 32;
 
     /**
      * Read-Only Fixed Length 32 bit unsigned integer array
@@ -130,6 +130,10 @@ export default class BitArray {
         arr[index] = BitOps.toggleBitAt(value, pos % BitArray.BITS_PER_ELEMENT);
     }
 
+    /**
+     * Standard PopCount that counts the number of set bits in the container
+     * @returns - The number of set bits
+     */
     public popCount(): number {
         let counter: number = 0;
 

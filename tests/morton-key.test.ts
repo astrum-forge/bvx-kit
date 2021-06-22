@@ -1,5 +1,5 @@
-import LinearKey from '../src/math/linear-key';
-import MortonKey from '../src/math/morton-key';
+import { LinearKey } from '../src/math/linear-key';
+import { MortonKey } from '../src/math/morton-key';
 
 /**
  * Provides 100% Coverage for morton-key.ts

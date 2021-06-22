@@ -20,7 +20,7 @@ class Node<K extends Key, V> {
  * designed to work with the Key structure. Specifically, MortonKey provides an excellent
  * distribution of 3D data for fast access.
  */
-export default class HashGrid<K extends Key, V> {
+export class HashGrid<K extends Key, V> {
     public static readonly DEFAULT_SIZE: number = 1024;
 
     private readonly _dict: Array<Array<Node<K, V>>>;
