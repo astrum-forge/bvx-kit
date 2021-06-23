@@ -2,7 +2,8 @@
   <img src="graphics/icon.png?raw=true" alt="BitVoxelStack Logo" width="700">
 </h3>
 
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/979709e7a893431f902b1b7b0aaaf068)](https://www.codacy.com/gh/DavidArayan/bvx.ts/dashboard?utm_source=github.com&utm_medium=referral&utm_content=DavidArayan/bvx.ts&utm_campaign=Badge_Grade)
+[![Twitter: @DavidArayan](https://img.shields.io/badge/contact-DavidArayan-blue.svg?style=flat)](https://twitter.com/DavidArayan)
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/4b7dbe49f42d465bb3b6f3c669801764)](https://www.codacy.com/gh/OvisTek/bvx.ts/dashboard?utm_source=github.com&utm_medium=referral&utm_content=OvisTek/bvx.ts&utm_campaign=Badge_Grade)
 [![Coverage Badge](badges/coverage-global%20coverage.svg)](badges)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg?style=flat)](LICENSE)
 
