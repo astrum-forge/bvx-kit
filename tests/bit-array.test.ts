@@ -23,6 +23,16 @@ describe('BitArray', () => {
         expect(bits2.length).toBe(2);
     });
 
+    it('.constructor() - buffer size', () => {
+        const bits0 = new BitArray();
+        const bits1 = new BitArray(1);
+        const bits2 = new BitArray(2);
+
+        expect(bits0.buffer.byteLength).toBe(4);
+        expect(bits1.buffer.byteLength).toBe(4);
+        expect(bits2.buffer.byteLength).toBe(8);
+    });
+
     it('.popCount() - all zeros', () => {
         const bits = new BitArray(10);
 

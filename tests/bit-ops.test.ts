@@ -33,6 +33,16 @@ describe('BitOps', () => {
         expect(BitOps.isEqual(test, test2)).toBe(true);
     });
 
+    it('.maskForBits() - 0 to 32', () => {
+        let endValue: number = 0;
+
+        for (let i = 0; i < 32; i++) {
+            expect(BitOps.maskForBits(i)).toBe(endValue);
+
+            endValue = (endValue * 2) + 1;
+        }
+    });
+
     it('.bitAt() - reading bits', () => {
         for (let i: number = 0; i < LOOP_COUNT; i++) {
             expect(BitOps.bitAt(TEST_VALUE, i)).toBe(EXPTECTED_BITS[i]);

@@ -42,14 +42,15 @@ export class CompactArray {
         const bits: number = CompactArray.BITS_PER_ELEMENT;
 
         this._elements = elements > 0 ? elements : 1;
-        this._bitsPerElement = (bitsPerElement > 0 || bitsPerElement <= bits) ? bitsPerElement : bits;
-        this._valueMask = ~(0xFFFFFFFF << this._bitsPerElement);
+        this._bitsPerElement = (bitsPerElement > 0) ? ((bitsPerElement < bits) ? bitsPerElement : (bits - 1)) : 1;
+        this._valueMask = BitOps.maskForBits(this._bitsPerElement);
 
-        this._array = new BitArray(((this._elements * this._bitsPerElement) / bits) | 0);
+        // the actual compact array storage - we leverage BitArray for this
+        this._array = new BitArray(Math.ceil((this._elements * this._bitsPerElement) / bits));
     }
 
-    public get elements(): Uint32Array {
-        return this._array.elements;
+    public get array(): BitArray {
+        return this._array;
     }
 
     public get length(): number {
@@ -78,6 +79,7 @@ export class CompactArray {
         const bucketIndex: number = (target / bits) | 0;
         const nextIndex: number = bucketIndex + 1;
         const readIndex: number = (target % bits) | 0;
+        const valueMask: number = this._valueMask;
 
         // grab the values from first index and next index
         // the read value for arbitrary bits can fall on the border of the bucket so some
@@ -91,23 +93,23 @@ export class CompactArray {
             // bits to read from the upper value
             const bitsFromUpper: number = bits - readIndex;
 
-            const lowerMask: number = this._valueMask << readIndex;
-            const upperMask: number = ((this._valueMask >> bitsFromUpper) ^ lowerMask) & this._valueMask;
+            const lowerMask: number = valueMask << readIndex;
+            const upperMask: number = ((valueMask >> bitsFromUpper) ^ lowerMask) & valueMask;
 
             const shiftBack: number = (bits - bitsFromUpper);
 
             const finalLowerValue: number = ((lowerValue & lowerMask) >> shiftBack) & upperMask;
             const finalUpperValue: number = ((upperValue & upperMask) << bitsFromUpper) & lowerMask;
 
-            return (finalLowerValue | finalUpperValue) & this._valueMask;
+            return (finalLowerValue | finalUpperValue) & valueMask;
         }
         else {
             // bits to read from the upper value
             const bitsFromUpper: number = bits - readIndex;
-            const lowerMask: number = this._valueMask << readIndex;
+            const lowerMask: number = valueMask << readIndex;
             const shiftBack: number = (bits - bitsFromUpper);
 
-            return ((lowerValue & lowerMask) >> shiftBack) & this._valueMask;
+            return ((lowerValue & lowerMask) >> shiftBack) & valueMask;
         }
     }
 
@@ -131,6 +133,7 @@ export class CompactArray {
         const bucketIndex: number = (target / bits) | 0;
         const nextIndex: number = bucketIndex + 1;
         const readIndex: number = (target % bits) | 0;
+        const valueMask: number = this._valueMask;
 
         // grab the values from first index and next index
         // the read value for arbitrary bits can fall on the border of the bucket so some
@@ -144,8 +147,8 @@ export class CompactArray {
             // bits to read from the upper value
             const bitsFromUpper: number = bits - readIndex;
 
-            const lowerMask: number = this._valueMask << readIndex;
-            const upperMask: number = ((this._valueMask >> bitsFromUpper) ^ lowerMask) & this._valueMask;
+            const lowerMask: number = valueMask << readIndex;
+            const upperMask: number = ((valueMask >> bitsFromUpper) ^ lowerMask) & valueMask;
 
             const lowerShiftedValue: number = (maskedValue << readIndex) & lowerMask;
             const upperShiftedValue: number = (maskedValue >> bitsFromUpper) & upperMask;
@@ -159,7 +162,7 @@ export class CompactArray {
         }
         else {
             // otherwise we just read from a single bucket
-            const lowerMask: number = this._valueMask << readIndex;
+            const lowerMask: number = valueMask << readIndex;
             const lowerShiftedValue: number = (maskedValue << readIndex) & lowerMask;
 
             // compute the new values to replace into the buckets
@@ -167,13 +170,5 @@ export class CompactArray {
 
             elements[bucketIndex] = newLowerValue;
         }
-    }
-
-    /**
-     * Standard PopCount that counts the number of set bits in the container
-     * @returns - The number of set bits
-     */
-    public popCount(): number {
-        return this._array.popCount();
     }
 }

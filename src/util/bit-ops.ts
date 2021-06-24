@@ -79,6 +79,17 @@ export class BitOps {
     }
 
     /**
+     * Calculates and returns the maximim value that can be stored given
+     * the number of provided bits. This can also be used as a mask for bit-wise
+     * operations.
+     * @param bits - The number of bits to be used for storage
+     * @returns - The maximum value that can be stored for provided bits
+     */
+    public static maskForBits(bits: number): number {
+        return ~(0xFFFFFFFF << bits);
+    }
+
+    /**
      * Standard PopCount that counts the number of set bits for the provided
      * 32 bit number
      * @param data - The data to cound the bits

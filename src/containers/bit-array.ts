@@ -8,6 +8,10 @@ export class BitArray {
     public static readonly BITS_PER_ELEMENT: number = 32;
 
     /**
+     * The raw buffer underpinning our data
+     */
+    private readonly _buffer: ArrayBuffer;
+    /**
      * Read-Only Fixed Length 32 bit unsigned integer array
      */
     private readonly _array: Uint32Array;
@@ -17,7 +21,12 @@ export class BitArray {
      * @param elements - Each element can store 32 bits number of bits = elements * 32
      */
     constructor(elements: number = 1) {
-        this._array = new Uint32Array(elements > 0 ? elements : 1);
+        this._buffer = new ArrayBuffer(elements > 0 ? elements * 4 : 4);
+        this._array = new Uint32Array(this._buffer);
+    }
+
+    public get buffer(): ArrayBuffer {
+        return this._buffer;
     }
 
     public get elements(): Uint32Array {
