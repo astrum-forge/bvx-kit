@@ -1,3 +1,4 @@
+import { BitArray } from "../containers/bit-array";
 import { Key } from "../math/key";
 
 /**
@@ -27,8 +28,7 @@ export class VoxelChunk {
      * 
      * Total Bit Size would be SIZE^3 x 64
      */
-    private readonly _voxels: Uint32Array;
-    private readonly _voxelsBuffer: ArrayBuffer;
+    private readonly _bitVoxels: BitArray;
 
     /**
      * Each Voxel allows for 1x16 bit meta-data. Meta-Data is user-specific data
@@ -40,7 +40,7 @@ export class VoxelChunk {
     private readonly _metaDataBuffer: ArrayBuffer;
 
     /**
-     * The Key that used to know where in world-coordinates the current VoxelChunk
+     * The Key that used to know where in local-coordinates the current VoxelChunk
      * resides in. The Key is used to find the Neighbouring chunks for queries.
      */
     private readonly _key: Key;
@@ -49,12 +49,11 @@ export class VoxelChunk {
         const size: number = VoxelChunk.SIZE;
         const size3: number = size * size * size;
 
-        // allocate buffers - bits to bytes
-        this._voxelsBuffer = new ArrayBuffer((size3 * 64) / 8);
-        this._metaDataBuffer = new ArrayBuffer((size3 * 16) / 8);
+        // allocate bitvoxels as a bit-array
+        this._bitVoxels = new BitArray((size3 * 64) / 32);
 
-        // allocate accessors
-        this._voxels = new Uint32Array(this._voxelsBuffer);
+        // allocate buffers - bits to bytes
+        this._metaDataBuffer = new ArrayBuffer((size3 * 16) / 8);
         this._metaData = new Uint16Array(this._metaDataBuffer);
 
         this._key = key;
@@ -63,4 +62,6 @@ export class VoxelChunk {
     public get key(): Key {
         return this._key;
     }
+
+
 }
