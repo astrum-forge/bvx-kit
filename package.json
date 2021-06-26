@@ -8,7 +8,7 @@
     "test:ci": "jest --ci --runInBand --coverage",
     "test": "jest",
     "coverage": "jest --coverage",
-    "clean": "rm -rf dist node_modules coverage",
+    "clean": "rm -rf dist node_modules coverage package-lock.json",
     "build-ts": "rm -rf dist && tsc --noEmitOnError",
     "build": "npm run build-ts",
     "watch": "watch 'npm run build' ./src"
