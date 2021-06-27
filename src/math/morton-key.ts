@@ -20,6 +20,11 @@ import { Key } from "./key";
  * -2 becomes 1022
  * 
  * See: https://en.wikipedia.org/wiki/Z-order_curve
+ * 
+ * MortonKeys are slower to operate than LinearKeys however they provide
+ * a much better data-distribution when used as a hash-key for inserting items
+ * randomly into a dictionary or hash-map. This can be important for Server-side
+ * data lookups.
  */
 export class MortonKey implements Key {
     /**
