@@ -51,7 +51,8 @@ export class Voxel {
     }
 
     /**
-     * Sets the 16 bit application-specific meta-data for this Voxel
+     * Sets the 16 bit application-specific meta-data for this Voxel.
+     * 16 bits (unsigned) allows storing values between 0 and 65535 inclusive
      */
     public set metaData(meta: number) {
         if (this._vxMetaReference === null) {
@@ -78,7 +79,8 @@ export class Voxel {
     }
 
     /**
-     * Returns the 16 bit application-specific meta-data for this Voxel
+     * Returns the 16 bit application-specific meta-data for this Voxel.
+     * 16 bits (unsigned) allows storing values between 0 and 65535 inclusive
      */
     public get metaData(): number {
         if (this._vxMetaReference === null) {

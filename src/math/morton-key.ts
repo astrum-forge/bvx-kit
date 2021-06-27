@@ -1,3 +1,4 @@
+import { BitOps } from "../util/bit-ops";
 import { Key } from "./key";
 
 /**
@@ -21,7 +22,10 @@ import { Key } from "./key";
  * See: https://en.wikipedia.org/wiki/Z-order_curve
  */
 export class MortonKey implements Key {
-    public static readonly KEY_MASK: number = 0x3FF;
+    /**
+     * Each component (x, y, z) can hold 10 bits of data for a total of 30 bits
+     */
+    public static readonly KEY_MASK: number = BitOps.maskForBits(10);
 
     public static readonly X3_MASK: number = 0x9249249;
     public static readonly Y3_MASK: number = 0x12492492;
