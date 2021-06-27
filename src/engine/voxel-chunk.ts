@@ -1,5 +1,6 @@
 import { BitArray } from "../containers/bit-array";
 import { Key } from "../math/key";
+import { Voxel } from "./voxel";
 
 /**
  * A single VoxelChunk manages a group of voxels and their states for a specific
@@ -63,5 +64,19 @@ export class VoxelChunk {
         return this._key;
     }
 
+    /**
+     * Returns a Voxel reference for the provided coordinates. Optionally accepts a Voxel as an argument
+     * that will be used to fill the required information. Will throw an Error if requested voxel 
+     * coordinates are out of bounds.
+     * @param x - The local x coordinate of the voxel in this VoxelChunk
+     * @param y - The local y coordinate of the voxel in this VoxelChunk
+     * @param z - The local z coordinate of the voxel in this VoxelChunk
+     * @param optres - Optional structure to use for the result
+     * @returns - Voxel reference that can be used to modify the voxel
+     */
+    public getVoxel(x: number, y: number, z: number, optres: Voxel | null = null): Voxel {
+        const result: Voxel = optres || new Voxel(0, this._metaData, this._bitVoxels);
 
+        return result;
+    }
 }
