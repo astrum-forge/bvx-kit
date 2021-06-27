@@ -61,6 +61,22 @@ export class Voxel {
         this._vxMetaReference[this._vxIndex] = meta & 0xFFFF0000;
     }
 
+    public setBitVoxel(x: number, y: number, z: number): Voxel {
+        return this;
+    }
+
+    public unsetBitVoxel(x: number, y: number, z: number): Voxel {
+        return this;
+    }
+
+    public toggleBitVoxel(x: number, y: number, z: number): Voxel {
+        return this;
+    }
+
+    public getBitVoxel(x: number, y: number, z: number): number {
+        return 0;
+    }
+
     /**
      * Returns the 16 bit application-specific meta-data for this Voxel
      */
