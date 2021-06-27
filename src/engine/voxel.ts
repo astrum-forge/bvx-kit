@@ -46,6 +46,10 @@ export class Voxel {
         return this;
     }
 
+    public isValid(): boolean {
+        return this._vxIndex >= 0 && this._bvxReference !== null && this._vxMetaReference !== null;
+    }
+
     /**
      * Sets the 16 bit application-specific meta-data for this Voxel
      */
