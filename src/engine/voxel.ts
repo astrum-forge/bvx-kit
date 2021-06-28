@@ -155,4 +155,20 @@ export class Voxel {
 
         return this._vxMetaReference[this._vxIndex];
     }
+
+    /**
+     * Counts the number of set BitVoxels contained in this Voxel reference.
+     * This uses BitOps.popCount() operation which should compute the results very fast.
+     */
+    public get length(): number {
+        if (this._bvxReference === null) {
+            return 0;
+        }
+
+        const elements: Uint32Array = this._bvxReference.elements;
+        const index: number = this._vxIndex;
+
+        // calculate the number of set bit-voxels via popCount
+        return BitOps.popCount(elements[index]) + BitOps.popCount(elements[index * 2]);
+    }
 }
