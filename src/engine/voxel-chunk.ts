@@ -1,5 +1,6 @@
 import { BitArray } from "../containers/bit-array";
 import { Key } from "../math/key";
+import { BitOps } from "../util/bit-ops";
 import { Voxel } from "./voxel";
 
 /**
@@ -60,6 +61,9 @@ export class VoxelChunk {
         this._key = key;
     }
 
+    /**
+     * Returns the Index Key for this VoxelChunk
+     */
     public get key(): Key {
         return this._key;
     }
@@ -68,6 +72,10 @@ export class VoxelChunk {
      * Returns a Voxel reference for the provided coordinates. Optionally accepts a Voxel as an argument
      * that will be used to fill the required information. Will throw an Error if requested voxel 
      * coordinates are out of bounds.
+     * 
+     * NOTE: There is no equivalent set() method, simply modify the returned reference with provided
+     * interface.
+     * 
      * @param x - The local x coordinate of the voxel in this VoxelChunk
      * @param y - The local y coordinate of the voxel in this VoxelChunk
      * @param z - The local z coordinate of the voxel in this VoxelChunk
@@ -75,8 +83,7 @@ export class VoxelChunk {
      * @returns - Voxel reference that can be used to modify the voxel
      */
     public getVoxel(x: number, y: number, z: number, optres: Voxel | null = null): Voxel {
-        const result: Voxel = optres || new Voxel(0, this._metaData, this._bitVoxels);
-
-        return result;
+        const index: number = BitOps.flattenCoord3(x, y, z, 2);
+        return optres ? optres.set(index, this._metaData, this._bitVoxels) : new Voxel(index, this._metaData, this._bitVoxels);
     }
 }
