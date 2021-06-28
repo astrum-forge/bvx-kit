@@ -138,6 +138,31 @@ export class BitOps {
     }
 
     /**
+     * Flattens a set of 3D coordinates into a 1D index that can be used as an array accessor or
+     * indexer for certain operations
+     * @param x - The x component (must fit within the boundary for bits)
+     * @param y - The y component (must fit within the boundary for bits)
+     * @param z - The z component (must fit within the boundary for bits)
+     * @param bits - The number of bits to use as a boundary for each component (between 1 and 10)
+     * @returns - The compacted/flattened index
+     */
+    public static flattenCoord3(x: number, y: number, z: number, bits: number): number {
+        return (((x | 0) << (bits * 2)) | ((y | 0) << bits) | (z | 0)) & ~(0xFFFFFFFF << (bits * 3));
+    }
+
+    /**
+     * Flattens a set of 2D coordinates into a 1D index that can be used as an array accessor or
+     * indecer for certain operations
+     * @param x - The x component (must fit within the boundary for bits)
+     * @param y - The y component (must fit within the boundary of bits)
+     * @param bits - The number of bits to use as a boundary for each component (between 1 and 16)
+     * @returns - The compacted/flattened index
+     */
+    public static flattenCoord2(x: number, y: number, bits: number): number {
+        return (((x | 0) << bits) | (y | 0)) & ~(0xFFFFFFFF << (bits * 3));
+    }
+
+    /**
      * Perform a robust approximate equality test between two 32 bit
      * floating point numbers. This is useful since floating point numbers
      * cannot be directly compared due to precision loss.

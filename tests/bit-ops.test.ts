@@ -151,4 +151,23 @@ describe('BitOps', () => {
 
         expect(testValue).toBe(TEST_VALUE);
     });
+
+    it('.flattenCoord2() - 2D coordinate flattening check', () => {
+        expect(BitOps.flattenCoord2(0, 0, 2)).toBe(0);
+        expect(BitOps.flattenCoord2(1, 1, 2)).toBe(5);
+        expect(BitOps.flattenCoord2(2, 2, 2)).toBe(10);
+        expect(BitOps.flattenCoord2(3, 3, 2)).toBe(15);
+        expect(BitOps.flattenCoord2(3, 0, 2)).toBe(12);
+        expect(BitOps.flattenCoord2(0, 3, 2)).toBe(3);
+    });
+
+    it('.flattenCoord3() - 3D coordinate flattening check', () => {
+        expect(BitOps.flattenCoord3(0, 0, 0, 2)).toBe(0);
+        expect(BitOps.flattenCoord3(1, 1, 1, 2)).toBe(21);
+        expect(BitOps.flattenCoord3(2, 2, 2, 2)).toBe(42);
+        expect(BitOps.flattenCoord3(3, 3, 3, 2)).toBe(63);
+        expect(BitOps.flattenCoord3(3, 3, 0, 2)).toBe(60);
+        expect(BitOps.flattenCoord3(3, 0, 3, 2)).toBe(51);
+        expect(BitOps.flattenCoord3(0, 3, 3, 2)).toBe(15);
+    });
 });
