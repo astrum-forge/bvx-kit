@@ -1,5 +1,5 @@
 <h3 align="center">
-  <img src="graphics/icon.png?raw=true" alt="BitVoxelStack Logo" width="700">
+  <img src="graphics/icon.png?raw=true" alt="OvisTek Logo" width="150">
 </h3>
 
 [![Twitter: @DavidArayan](https://img.shields.io/badge/contact-DavidArayan-blue.svg?style=flat)](https://twitter.com/DavidArayan)
