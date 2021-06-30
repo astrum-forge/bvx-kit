@@ -13,7 +13,6 @@ export class VoxelIndex implements Key {
      */
     private static readonly KEY_MASK: number = BitOps.maskForBits(2);
     private static readonly VX_MASK: number = BitOps.maskForBits(6);
-    private static readonly VALUE_MASK: number = BitOps.maskForBits(12);
 
     private _key: number = 0;
 
