@@ -1,4 +1,3 @@
-import { LinearKey } from '../src/math/linear-key';
 import { MortonKey } from '../src/math/morton-key';
 import { VoxelIndex } from '../src/engine/voxel-index';
 
@@ -323,5 +322,10 @@ describe('VoxelIndex', () => {
 
         expect(keyTwos.vKey).toBe(42);
         expect(keyTwos.bKey).toBe(42);
+
+        const keyLast = clazz.from(1, 2, 3, 3, 2, 1);
+
+        expect(keyLast.vKey).toBe(27);
+        expect(keyLast.bKey).toBe(57);
     });
 });
