@@ -40,20 +40,6 @@ export class VoxelIndex implements Key {
         return optres;
     }
 
-    /**
-     * Create a new VoxelIndex provided a 12 bit encoded key
-     * @param key - The encoded key to use
-     * @param optres - The optional VoxelIndex to encode values into
-     * @returns - Newly constructed VoxelIndex
-     */
-    public static fromKey(key: number, optres: VoxelIndex | null = null): VoxelIndex {
-        optres = optres || new VoxelIndex();
-
-        optres._key = key & VoxelIndex.VALUE_MASK;
-
-        return optres;
-    }
-
     private static _Encode(x: number, y: number, z: number, u: number, v: number, w: number): number {
         const mask: number = VoxelIndex.KEY_MASK;
 
@@ -158,6 +144,14 @@ export class VoxelIndex implements Key {
         }
 
         return this.x === other.x && this.y === other.y && this.z === other.z;
+    }
+
+    public copy(optres: VoxelIndex | null = null): VoxelIndex {
+        optres = optres || new VoxelIndex();
+
+        optres._key = this._key;
+
+        return optres;
     }
 
     clone(): VoxelIndex {
