@@ -1,7 +1,6 @@
 import { BitArray } from "../containers/bit-array";
 import { Key } from "../math/key";
-import { BitOps } from "../util/bit-ops";
-import { Voxel } from "./voxel";
+import { VoxelIndex } from "./voxel-index";
 
 /**
  * A single VoxelChunk manages a group of voxels and their states for a specific
@@ -22,7 +21,8 @@ export class VoxelChunk {
      * voxelsCount = SIZE^3
      * bitVoxelsCount = (SIZE^3) x 64
      */
-    public static readonly SIZE = 4;
+    public static readonly SIZE: number = 4;
+    public static readonly BVX_SUBDIV: number = 4;
 
     /**
      * Each Voxel has 4x4x4 BitVoxels hence we need to allocate 64 bits per voxel
@@ -49,10 +49,13 @@ export class VoxelChunk {
 
     constructor(key: Key) {
         const size: number = VoxelChunk.SIZE;
+        const bvxSize: number = VoxelChunk.BVX_SUBDIV;
+
         const size3: number = size * size * size;
+        const bvxSize3: number = bvxSize * bvxSize * bvxSize;
 
         // allocate bitvoxels as a bit-array
-        this._bitVoxels = new BitArray((size3 * 64) / 32);
+        this._bitVoxels = new BitArray((size3 * bvxSize3) / 32);
 
         // allocate buffers - bits to bytes
         this._metaDataBuffer = new ArrayBuffer((size3 * 16) / 8);
@@ -69,21 +72,61 @@ export class VoxelChunk {
     }
 
     /**
-     * Returns a Voxel reference for the provided coordinates. Optionally accepts a Voxel as an argument
-     * that will be used to fill the required information. Will throw an Error if requested voxel 
-     * coordinates are out of bounds.
-     * 
-     * NOTE: There is no equivalent set() method, simply modify the returned reference with provided
-     * interface.
-     * 
-     * @param x - The local x coordinate of the voxel in this VoxelChunk
-     * @param y - The local y coordinate of the voxel in this VoxelChunk
-     * @param z - The local z coordinate of the voxel in this VoxelChunk
-     * @param optres - Optional structure to use for the result
-     * @returns - Voxel reference that can be used to modify the voxel
+     * Sets the meta-data for the provided Voxel Index
+     * @param key - The Voxel Index to set the meta-data
+     * @param meta - The 16 bit meta-data to set
      */
-    public getVoxel(x: number, y: number, z: number, optres: Voxel | null = null): Voxel {
-        const index: number = BitOps.flattenCoord3(x, y, z, 2);
-        return optres ? optres.set(index, this._metaData, this._bitVoxels) : new Voxel(index, this._metaData, this._bitVoxels);
+    public setMetaData(key: VoxelIndex, meta: number): void {
+        this._metaData[key.vKey] = meta;
+    }
+
+    /**
+     * Returns the encoded meta-data for the provided Voxel Index
+     * @param key - The Voxel Index
+     * @returns - The 16 bit encoded meta-data
+     */
+    public getMetaData(key: VoxelIndex): number {
+        return this._metaData[key.vKey];
+    }
+
+    /**
+     * Sets the BitVoxel to the 1/ON state at provided position
+     * @param key - The Voxel Index
+     */
+    public setBitVoxel(key: VoxelIndex): void {
+        this._bitVoxels.setBitAt(key.key);
+    }
+
+    /**
+     * Unsets the BitVoxel to the 0/OFF state at provided position
+     * @param key - The Voxel Index
+     */
+    public unsetBitVoxel(key: VoxelIndex): void {
+        this._bitVoxels.unsetBitAt(key.key);
+    }
+
+    /**
+     * Toggle the BitVoxel to the ON/OFF States based on previous state
+     * @param key - The Voxel Index
+     */
+    public toggleBitVoxel(key: VoxelIndex): void {
+        this._bitVoxels.toggleBitAt(key.key);
+    }
+
+    /**
+     * Returns the current state of the requested BitVoxel
+     * @param key - The Voxel Index
+     * @returns - 1 if ON or 0 if OFF
+     */
+    public getBitVoxel(key: VoxelIndex): number {
+        return this._bitVoxels.bitAt(key.key);
+    }
+
+    /**
+     * Counts the number of set BitVoxels contained in this VoxelChunk reference.
+     * This uses BitOps.popCount() operation which should compute the results very fast.
+     */
+    public get length(): number {
+        return this._bitVoxels.popCount();
     }
 }

@@ -92,8 +92,8 @@ export class BitOps {
     /**
      * Standard PopCount that counts the number of set bits for the provided
      * 32 bit number
-     * @param data - The data to cound the bits
-     * @returns - The number of set bits
+     * @param data - The data to count the bits
+     * @returns - The number of set bits, max 32 (32 bit number)
      */
     public static popCount(data: number): number {
         const data0: number = data - ((data >> 1) & 0x55555555);

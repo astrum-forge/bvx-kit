@@ -30,15 +30,15 @@ export class MortonKey implements Key {
     /**
      * Each component (x, y, z) can hold 10 bits of data for a total of 30 bits
      */
-    public static readonly KEY_MASK: number = BitOps.maskForBits(10);
+    private static readonly KEY_MASK: number = BitOps.maskForBits(10);
 
-    public static readonly X3_MASK: number = 0x9249249;
-    public static readonly Y3_MASK: number = 0x12492492;
-    public static readonly Z3_MASK: number = 0x24924924;
+    private static readonly X3_MASK: number = 0x9249249;
+    private static readonly Y3_MASK: number = 0x12492492;
+    private static readonly Z3_MASK: number = 0x24924924;
 
-    public static readonly XY3_MASK: number = MortonKey.X3_MASK | MortonKey.Y3_MASK;
-    public static readonly XZ3_MASK: number = MortonKey.X3_MASK | MortonKey.Z3_MASK;
-    public static readonly YZ3_MASK: number = MortonKey.Y3_MASK | MortonKey.Z3_MASK;
+    private static readonly XY3_MASK: number = MortonKey.X3_MASK | MortonKey.Y3_MASK;
+    private static readonly XZ3_MASK: number = MortonKey.X3_MASK | MortonKey.Z3_MASK;
+    private static readonly YZ3_MASK: number = MortonKey.Y3_MASK | MortonKey.Z3_MASK;
 
     private _key: number = 0;
 

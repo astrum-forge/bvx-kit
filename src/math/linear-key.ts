@@ -27,7 +27,7 @@ export class LinearKey implements Key {
     /**
      * Each component (x, y, z) can hold 10 bits of data for a total of 30 bits
      */
-    public static readonly KEY_MASK: number = BitOps.maskForBits(10);
+    private static readonly KEY_MASK: number = BitOps.maskForBits(10);
 
     private _key: number = 0;
 
