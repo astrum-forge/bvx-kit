@@ -47,10 +47,25 @@ describe('VoxelIndex', () => {
         expect(key.bz).toBe(key2.bz);
     });
 
-    it('.clone() - copy equality', () => {
+    it('.clone() - clone equality', () => {
         const key = clazz.from(randomX, randomY, randomZ, randomX, randomY, randomZ);
 
         const key2 = key.clone();
+
+        expect(key.vx).toBe(key2.vx);
+        expect(key.vy).toBe(key2.vy);
+        expect(key.vz).toBe(key2.vz);
+
+        expect(key.bx).toBe(key2.bx);
+        expect(key.by).toBe(key2.by);
+        expect(key.bz).toBe(key2.bz);
+    });
+
+    it('.set key - key equality', () => {
+        const key = clazz.from(randomX, randomY, randomZ, randomX, randomY, randomZ);
+
+        const key2 = new clazz();
+        key2.key = key.key;
 
         expect(key.vx).toBe(key2.vx);
         expect(key.vy).toBe(key2.vy);

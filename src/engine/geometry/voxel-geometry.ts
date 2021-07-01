@@ -1,4 +1,5 @@
 import { VoxelChunk } from "../voxel-chunk";
+import { VoxelWorld } from "../voxel-world";
 
 /**
  * VoxelGeometry is represented as an index to be used against a LUT table
@@ -52,6 +53,7 @@ export abstract class VoxelGeometry {
      * Computes the GeometryIndex using the neighbouring faces for a provided VoxelChunk. Geometry
      * is generated in a way that disallows rendering of fully occluded or invisible bitVoxels.
      * @param center - The VoxelChunk to generate the geometry for
+     * @param world - The VoxelWorld instance to be used for near-neighbour queries
      */
-    public abstract computeIndices(center: VoxelChunk): void;
+    public abstract computeIndices(center: VoxelChunk, world: VoxelWorld): void;
 }

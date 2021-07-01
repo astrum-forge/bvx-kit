@@ -11,6 +11,7 @@ export * from "./math/morton-key";
 export * from "./util/bit-ops";
 
 // export engine
+export * from "./engine/voxel-world";
 export * from "./engine/voxel-chunk";
 export * from "./engine/voxel-index";
 export * from "./engine/geometry/voxel-geometry";
