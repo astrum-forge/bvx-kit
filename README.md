@@ -5,10 +5,18 @@
 [![Twitter: @DavidArayan](https://img.shields.io/badge/contact-DavidArayan-blue.svg?style=flat)](https://twitter.com/DavidArayan)
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/4b7dbe49f42d465bb3b6f3c669801764)](https://www.codacy.com/gh/OvisTek/bvx.ts/dashboard?utm_source=github.com&utm_medium=referral&utm_content=OvisTek/bvx.ts&utm_campaign=Badge_Grade)
 [![Coverage Badge](badges/coverage-global%20coverage.svg)](badges)
+[![install size](https://packagephobia.com/badge?p=@ovistek/bvx.ts)](https://packagephobia.com/result?p=@ovistek/bvx.ts)
+[![NPM](https://img.shields.io/npm/v/@ovistek/bvx.ts)](https://www.npmjs.com/package/@ovistek/bvx.ts)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg?style=flat)](LICENSE)
+
+#### **Generic & Renderer Agnostic BitVoxel Engine Implementation in TypeScript**
 
 * * *
 
-#### Open Source Generic Bit-Voxel Engine Implementation in TypeScript
+#### _Installation_
 
-Currently in early stage development. Not in a usable state. Not accepting pull requests until MVP 1.0 release. Thank you!
+-   Install using [npm](https://www.npmjs.com/package/@ovistek/bvx.ts)
+
+```console
+npm install @ovistek/bvx.ts
+```
