@@ -1,8 +1,12 @@
-node_modules
+node_modules/
+tsconfig.json
 package-lock.json
+jest.config.js
+tests/
+src/
 coverage/
+.github/
 .DS_Store
-dist/
 badges/coverage-branches.svg
 badges/coverage-functions.svg
 badges/coverage-lines.svg

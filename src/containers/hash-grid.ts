@@ -4,13 +4,14 @@ import { Key } from "../math/key";
  * Internal node for managing the HashGrid structure. contains
  * read-only key-value pairs.
  */
-class Node<K extends Key, V> {
-    public readonly key: K;
+class Node<V> {
+    // this is the encoded key stores as a number
+    public readonly key: number;
     public value: V;
 
-    constructor(key: K, value: V) {
+    constructor(key: number, value: V) {
         // key is cloned so reference is not changed externally
-        this.key = <K>key.clone();
+        this.key = key;
         this.value = value;
     }
 }
@@ -23,12 +24,12 @@ class Node<K extends Key, V> {
 export class HashGrid<K extends Key, V> {
     public static readonly DEFAULT_SIZE: number = 1024;
 
-    private readonly _dict: Array<Array<Node<K, V>>>;
+    private readonly _dict: Array<Array<Node<V>>>;
     private readonly _size: number;
 
     constructor(buckets: number = HashGrid.DEFAULT_SIZE) {
         this._size = buckets > 0 ? buckets : HashGrid.DEFAULT_SIZE;
-        this._dict = new Array<Array<Node<K, V>>>(this._size);
+        this._dict = new Array<Array<Node<V>>>(this._size);
     }
 
     /**
@@ -41,8 +42,8 @@ export class HashGrid<K extends Key, V> {
     /**
      * Internal function that calculates and return an appropriate bucket for the provided key
      */
-    private _GetKeyBucket(key: K): Array<Node<K, V>> | null {
-        const value: Array<Node<K, V>> | null | undefined = this._dict[key.key % this._size];
+    private _GetKeyBucket(key: K): Array<Node<V>> | null {
+        const value: Array<Node<V>> | null | undefined = this._dict[key.key % this._size];
 
         return value ? value : null;
     }
@@ -54,8 +55,8 @@ export class HashGrid<K extends Key, V> {
      * @param key - Key to use for search
      * @returns - Node Reference if found or null
      */
-    private _Get(key: K): Node<K, V> | null {
-        const bucket: Array<Node<K, V>> | null = this._GetKeyBucket(key);
+    private _Get(key: K): Node<V> | null {
+        const bucket: Array<Node<V>> | null = this._GetKeyBucket(key);
 
         if (bucket !== null) {
             // NOTE - This should be optimised from O(n) to O(log(n))
@@ -64,10 +65,10 @@ export class HashGrid<K extends Key, V> {
             const length: number = bucket.length;
 
             for (let i: number = 0; i < length; i++) {
-                const node: Node<K, V> | undefined | null = bucket[i];
+                const node: Node<V> | undefined | null = bucket[i];
 
                 // we found our object, return and terminate
-                if (node && node.key.cmp(key)) {
+                if (node && node.key === key.key) {
                     return node;
                 }
             }
@@ -83,7 +84,7 @@ export class HashGrid<K extends Key, V> {
      * @returns - Value if found or null
      */
     public get(key: K): V | null {
-        const node: Node<K, V> | null = this._Get(key);
+        const node: Node<V> | null = this._Get(key);
 
         if (node !== null) {
             return node.value;
@@ -99,20 +100,20 @@ export class HashGrid<K extends Key, V> {
      * @param value - The value to set
      */
     public set(key: K, value: V): void {
-        const node: Node<K, V> | null = this._Get(key);
+        const node: Node<V> | null = this._Get(key);
 
         // first time inserting this object
         if (node === null) {
             const bucketKey: number = key.key % this._size;
-            const bucket: Array<Node<K, V>> | undefined | null = this._dict[bucketKey];
+            const bucket: Array<Node<V>> | undefined | null = this._dict[bucketKey];
 
             // bucket exists, just append
             if (bucket) {
-                bucket.push(new Node<K, V>(key, value));
+                bucket.push(new Node<V>(key.key, value));
             }
             else {
                 // otherwise, initialise a new bucket with our requested node
-                this._dict[bucketKey] = new Array<Node<K, V>>(new Node<K, V>(key, value));
+                this._dict[bucketKey] = new Array<Node<V>>(new Node<V>(key.key, value));
             }
         }
         else {
@@ -126,7 +127,7 @@ export class HashGrid<K extends Key, V> {
      * @returns - Returns true if a value was removed, false otherwise
      */
     public remove(key: K): boolean {
-        const node: Node<K, V> | null = this._Get(key);
+        const node: Node<V> | null = this._Get(key);
 
         if (node !== null) {
             // if statements here will never execute, so we never need them

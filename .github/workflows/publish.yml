@@ -1,0 +1,23 @@
+name: NPM Publish
+on: 
+  push:
+    branches:
+      - main
+    tags:
+      - v*.*.*
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - name: set tag version
+        run: echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+      - uses: actions/setup-node@v1
+        with:
+          node-version: 16
+      - run: npm run clean:build
+      - uses: JS-DevTools/npm-publish@v1
+        with:
+          token: ${{ secrets.NPM_PUBLISH_TOKEN }}
+          tag: ${{ env.RELEASE_VERSION }}
+          access: 'public'

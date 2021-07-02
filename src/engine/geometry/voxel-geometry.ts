@@ -1,3 +1,4 @@
+import { BitOps } from "../../util/bit-ops";
 import { VoxelChunk } from "../voxel-chunk";
 import { VoxelWorld } from "../voxel-world";
 
@@ -26,7 +27,7 @@ export abstract class VoxelGeometry {
 
         // we require 8 bits max per geometry index
         // each bit-voxel has its own geometry index
-        this._geometryIndicesBuffer = new ArrayBuffer(size * bvxSize);
+        this._geometryIndicesBuffer = new ArrayBuffer((size * size * size) * (bvxSize * bvxSize * bvxSize));
         this._geometryIndices = new Uint8Array(this._geometryIndicesBuffer);
     }
 
@@ -47,6 +48,23 @@ export abstract class VoxelGeometry {
      */
     public reset(): void {
         this._geometryIndices.fill(0);
+    }
+
+    /**
+     * Standard PopCount that counts the number of set bits in the container
+     * @returns - The number of set bits
+     */
+    public popCount(): number {
+        let counter: number = 0;
+
+        const arr: Uint8Array = this._geometryIndices;
+        const length: number = arr.length;
+
+        for (let i: number = 0; i < length; i++) {
+            counter += BitOps.popCount(arr[i]);
+        }
+
+        return counter;
     }
 
     /**

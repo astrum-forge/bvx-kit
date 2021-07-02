@@ -1,5 +1,5 @@
 import { BitArray } from "../containers/bit-array";
-import { Key } from "../math/key";
+import { MortonKey } from "../math/morton-key";
 import { VoxelIndex } from "./voxel-index";
 
 /**
@@ -45,9 +45,9 @@ export class VoxelChunk {
      * The Key that used to know where in local-coordinates the current VoxelChunk
      * resides in. The Key is used to find the Neighbouring chunks for queries.
      */
-    private readonly _key: Key;
+    private readonly _key: MortonKey;
 
-    constructor(key: Key) {
+    constructor(key: MortonKey) {
         const size: number = VoxelChunk.SIZE;
         const bvxSize: number = VoxelChunk.BVX_SUBDIV;
 
@@ -67,7 +67,7 @@ export class VoxelChunk {
     /**
      * Returns the Index Key for this VoxelChunk
      */
-    public get key(): Key {
+    public get key(): MortonKey {
         return this._key;
     }
 
@@ -128,5 +128,14 @@ export class VoxelChunk {
      */
     public get length(): number {
         return this._bitVoxels.popCount();
+    }
+
+    /**
+     * Check to see if VoxelChunk instances match by comparing the keys
+     * @param other - the VoxelChunk to compare with
+     * @returns - True if match, false otherwise
+     */
+    public cmp(other: VoxelChunk | null): boolean {
+        return other !== null ? this._key.cmp(other._key) : false;
     }
 }

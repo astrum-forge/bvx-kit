@@ -4,13 +4,13 @@ jobs:
   bump:
     runs-on: ubuntu-latest
     steps:
-    - name: Check out repository code
+    - name: check out repository code
       uses: actions/checkout@v2
-    - name: NPM Install
+    - name: npm install
       run: npm install
-    - name: Tests
+    - name: tests
       run: npm run test:ci
-    - name: Generating coverage badges
+    - name: generating coverage badges
       uses: jpb06/jest-badges-action@v1.3.1
       with:
         branches: master,main

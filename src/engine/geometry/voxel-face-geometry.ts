@@ -22,6 +22,11 @@ export class VoxelFaceGeometry extends VoxelGeometry {
     public static readonly Z_NEG_INDEX: number = 5;
 
     /**
+     * GeometryIndex for faces is only 6 bits
+     */
+    private static readonly KEY_MASK: number = BitOps.maskForBits(6);
+
+    /**
      * reusable temporary containers to work with VoxelIndex a little easier
      */
     private static readonly TMP_VI_CENTER: VoxelIndex = new VoxelIndex();
@@ -54,7 +59,7 @@ export class VoxelFaceGeometry extends VoxelGeometry {
         const dfChunk: VoxelChunk = VoxelFaceGeometry.TMP_CHUNK;
         const dfKey: MortonKey = VoxelFaceGeometry.TMP_MK;
 
-        const centerKey: MortonKey = <MortonKey>center.key;
+        const centerKey: MortonKey = center.key;
 
         // get the voxel-chunk neighbours to be used for the edge-queries
         // these are replaced by the default-zero dfChunk if chunks cannot be found
@@ -77,12 +82,15 @@ export class VoxelFaceGeometry extends VoxelGeometry {
         const yNegIndex: number = VoxelFaceGeometry.Y_NEG_INDEX;
         const zPosIndex: number = VoxelFaceGeometry.Z_POS_INDEX;
         const zNegIndex: number = VoxelFaceGeometry.Z_NEG_INDEX;
+        const mask: number = VoxelFaceGeometry.KEY_MASK;
 
         // loop through all bit-voxels and generate the geometry index for each one
         // each VoxelChunk has 4 x 4 x 4 = 64 Voxels
         // each Voxel has 4 x 4 x 4 = 64 BitVoxels
         // therefore each VoxelChunk has 4096 BitVoxels
-        for (let index: number = 0; index < 4096; index++) {
+        const length: number = this.length;
+
+        for (let index: number = 0; index < length; index++) {
             // set the key as the index
             vic.key = index;
 
@@ -122,7 +130,7 @@ export class VoxelFaceGeometry extends VoxelGeometry {
             geometryIndex = BitOps.setBit(geometryIndex, zNegIndex, (~bvzn) & 1);
 
             // update geometry index for this BitVoxel
-            indices[index] = geometryIndex;
+            indices[index] = geometryIndex & mask;
         }
     }
 

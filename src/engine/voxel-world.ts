@@ -26,6 +26,8 @@ export class VoxelWorld {
     private readonly _voxelChunks: HashGrid<MortonKey, VoxelChunk>;
 
     constructor() {
+        // init with 1024 buckets for now, this can be increased to decrease
+        // the O(n) search space for more constant lookups at cost of memory
         this._voxelChunks = new HashGrid<MortonKey, VoxelChunk>(1024);
     }
 
@@ -56,11 +58,10 @@ export class VoxelWorld {
 
     /**
      * Inserts a new VoxelChunk instance at the provided Morton Key Coordinate
-     * @param key - The Morton Key Coordinate
      * @param chunk - The Chunk instance to insert
      */
-    public insert(key: MortonKey, chunk: VoxelChunk): void {
-        this._voxelChunks.set(key, chunk);
+    public insert(chunk: VoxelChunk): void {
+        this._voxelChunks.set(chunk.key, chunk);
     }
 
     /**
