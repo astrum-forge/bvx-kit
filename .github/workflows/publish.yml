@@ -16,6 +16,8 @@ jobs:
         with:
           node-version: 16
       - run: npm run clean:build
+      - name: set pre-release version
+        run: npm version prerelease --preid=${{ env.RELEASE_VERSION }}
       - uses: JS-DevTools/npm-publish@v1
         with:
           token: ${{ secrets.NPM_PUBLISH_KEY }}
