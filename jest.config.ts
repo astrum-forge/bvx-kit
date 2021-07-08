@@ -1,4 +1,7 @@
-module.exports = {
+import type { Config } from '@jest/types';
+
+const config: Config.InitialOptions = {
+    preset: 'ts-jest',
     transform: {
         "^.+\\.ts?$": "ts-jest"
     },
@@ -7,3 +10,5 @@ module.exports = {
     moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json", "node"],
     coverageReporters: ["json-summary"]
 };
+
+export default config;

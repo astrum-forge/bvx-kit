@@ -4,7 +4,6 @@
   "description": "Generic & Renderer Agnostic BitVoxel Engine Implementation in TypeScript",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "type": "module",
   "scripts": {
     "test:ci": "jest --ci --runInBand --coverage",
     "test": "jest",
@@ -31,7 +30,7 @@
   },
   "homepage": "https://github.com/OvisTek/bvx.ts",
   "devDependencies": {
-    "@types/jest": "^26.0.23",
+    "@types/jest": "^26.0.24",
     "jest": "^27.0.6",
     "ts-jest": "^27.0.3",
     "typescript": "^4.3.5",
