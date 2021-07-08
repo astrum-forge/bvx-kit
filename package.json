@@ -4,6 +4,7 @@
   "description": "Generic & Renderer Agnostic BitVoxel Engine Implementation in TypeScript",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "type": "module",
   "scripts": {
     "test:ci": "jest --ci --runInBand --coverage",
     "test": "jest",
