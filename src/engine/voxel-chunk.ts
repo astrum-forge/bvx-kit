@@ -98,6 +98,34 @@ export class VoxelChunk {
     }
 
     /**
+     * Fills the provided Voxel with enabled BitVoxels. This is much faster
+     * than individually filling a Voxel using a looped coordinate.
+     * @param key - The Voxel Index
+     */
+    public fillVoxel(key: VoxelIndex): void {
+        const vxIndex: number = key.vKey * 2;
+        const allFullBits: number = 0xFFFFFFFF;
+
+        const elements: Uint32Array = this._bitVoxels.elements;
+        elements[vxIndex] = allFullBits;
+        elements[vxIndex + 1] = allFullBits;
+    }
+
+    /**
+     * Empties the provided Voxel with disabled BitVoxels. This is
+     * much faster than individually emptying a Voxel using a looped coordinate.
+     * @param key - The Voxel Index
+     */
+    public emptyVoxel(key: VoxelIndex): void {
+        const vxIndex: number = key.vKey * 2;
+        const allEmptyBits: number = 0x00000000;
+
+        const elements: Uint32Array = this._bitVoxels.elements;
+        elements[vxIndex] = allEmptyBits;
+        elements[vxIndex + 1] = allEmptyBits;
+    }
+
+    /**
      * Unsets the BitVoxel to the 0/OFF state at provided position
      * @param key - The Voxel Index
      */

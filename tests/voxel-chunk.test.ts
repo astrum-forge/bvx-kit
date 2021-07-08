@@ -104,4 +104,52 @@ describe('VoxelChunk', () => {
             expect(chunk.getBitVoxel(new VoxelIndex(i))).toEqual(0);
         }
     });
+
+    it('.fillVoxel() .emptyVoxel() - ensure correct voxels get filled & emptied', () => {
+        const chunk = new VoxelChunk(MortonKey.from(0, 0, 0));
+
+        let iterations = 0;
+
+        // do the fill operations
+        for (let vx: number = 0; vx < VoxelChunk.BVX_SUBDIV; vx++) {
+            for (let vy: number = 0; vy < VoxelChunk.BVX_SUBDIV; vy++) {
+                for (let vz: number = 0; vz < VoxelChunk.BVX_SUBDIV; vz++) {
+                    chunk.fillVoxel(VoxelIndex.from(vx, vy, vz, 0, 0, 0));
+
+                    iterations++;
+
+                    expect(chunk.length).toEqual(iterations * 64);
+
+                    for (let x: number = 0; x < VoxelChunk.BVX_SUBDIV; x++) {
+                        for (let y: number = 0; y < VoxelChunk.BVX_SUBDIV; y++) {
+                            for (let z: number = 0; z < VoxelChunk.BVX_SUBDIV; z++) {
+                                expect(chunk.getBitVoxel(VoxelIndex.from(vx, vy, vz, x, y, z))).toEqual(1);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // do the empty operations
+        for (let vx: number = 0; vx < VoxelChunk.BVX_SUBDIV; vx++) {
+            for (let vy: number = 0; vy < VoxelChunk.BVX_SUBDIV; vy++) {
+                for (let vz: number = 0; vz < VoxelChunk.BVX_SUBDIV; vz++) {
+                    chunk.emptyVoxel(VoxelIndex.from(vx, vy, vz, 0, 0, 0));
+
+                    iterations--;
+
+                    expect(chunk.length).toEqual(iterations * 64);
+
+                    for (let x: number = 0; x < VoxelChunk.BVX_SUBDIV; x++) {
+                        for (let y: number = 0; y < VoxelChunk.BVX_SUBDIV; y++) {
+                            for (let z: number = 0; z < VoxelChunk.BVX_SUBDIV; z++) {
+                                expect(chunk.getBitVoxel(VoxelIndex.from(vx, vy, vz, x, y, z))).toEqual(0);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
 });
