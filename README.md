@@ -13,13 +13,9 @@
 
 * * *
 
-_**BitVoxels**_ is a Voxel subdivision scheme that trades flexibility for memory efficiency. Under the scheme, Voxels are subdivided into _**BitVoxel**_ states with inherited meta-data. This allows rendering smaller Voxels with predictable memory costs.
+_**BitVoxels**_ is a Voxel subdivision scheme that trades flexibility for memory efficiency. Under the scheme, Voxels are subdivided into _**BitVoxel**_ states with inherited meta-data.
 
-This framework is renderer agnostic and is designed to be plugged into any custom code. Additional work is required for various integrations. For the purposes of stability and robustness, full unit testing with 100% code coverage is provided.
-
-Be warned, the framework internals uses _**ALOT**_ of Bitwise operations! 
-
-#### _Installation_
+### _**Installation**_
 
 -   Install using [npm](https://www.npmjs.com/package/@ovistek/bvx.ts)
 
@@ -27,7 +23,7 @@ Be warned, the framework internals uses _**ALOT**_ of Bitwise operations!
 npm install @ovistek/bvx.ts
 ```
 
-#### _About_
+### _**About**_
 
 Subdividing Voxels is difficult. Think about games like Minecraft and what it would take to make those voxels smaller. Just by reducing the Voxel size by a factor of 2 (2x smaller Voxels) would require 8x more memory and a reduction of the Voxel size by a factor of 4 (4x smaller Voxels) would require a whopping 64x more memory. This is because subdividing Voxels in a grid-like manner requires O(n^3) times more memory (Cubic growth).
 
@@ -38,3 +34,12 @@ BitVoxels is an alternative subdivision scheme that stores individual voxels as 
 This framework uses 4x subdivision, hence each standard Voxel stores 64 BitVoxel states and each Voxel stores an additional 16 bits for arbitrary meta-data. Under this scheme, each Voxel requires a total of 80 bits or 10 bytes worth of data. During rendering, the BitVoxels simply inherit the meta-data from the parent Voxel.
 
 It is not an optimal solution, however we believe the scheme has fair tradeoffs compared to alternatives.
+
+### _**Before & After 4x BitVoxel Subdivision**_
+
+-   Example images are using [bvx-glut](https://github.com/OvisTek/bvx-glut) Geometry Lookup Table (LUT) for rendering.
+
+<h3 align="center">
+  <img src="graphics/screen_1.png?raw=true" alt="Before BitVoxel Subdivision" width="300">
+  <img src="graphics/screen_0.png?raw=true" alt="4x BitVoxel Subdivision" width="300">
+</h3>
