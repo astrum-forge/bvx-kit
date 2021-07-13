@@ -26,13 +26,13 @@ export class VoxelIndex implements Key {
      * @param x - x position of the Voxel (0-3)
      * @param y - y position of the Voxel (0-3)
      * @param z - z position of the Voxel (0-3)
-     * @param u - x position of the BitVoxel (0-3)
-     * @param v - y position of the BitVoxel (0-3)
-     * @param w - z position of the BitVoxel (0-3)
-     * @param optres - The optional VoxelIndex to encode values into
-     * @returns - Newly constructed VoxelIndex
+     * @param u - (optional) x position of the BitVoxel (0-3) - default 0
+     * @param v - (optional) y position of the BitVoxel (0-3) - default 0
+     * @param w - (optional) z position of the BitVoxel (0-3) - default 0
+     * @param optres - (optional) VoxelIndex to encode values into - default null
+     * @returns - newly constructed VoxelIndex
      */
-    public static from(x: number, y: number, z: number, u: number, v: number, w: number, optres: VoxelIndex | null = null): VoxelIndex {
+    public static from(x: number, y: number, z: number, u: number = 0, v: number = 0, w: number = 0, optres: VoxelIndex | null = null): VoxelIndex {
         optres = optres || new VoxelIndex();
 
         optres._key = VoxelIndex._Encode(x, y, z, u, v, w);

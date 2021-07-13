@@ -152,4 +152,27 @@ describe('VoxelChunk', () => {
             }
         }
     });
+
+    it('.getBitVoxelCount() - ensure BitVoxels can be counted correctly', () => {
+        const chunk = new VoxelChunk(MortonKey.from(0, 0, 0));
+
+        chunk.fillVoxel(VoxelIndex.from(1, 1, 1));
+
+        expect(chunk.getBitVoxelCount(VoxelIndex.from(1, 1, 1))).toEqual(64);
+
+        chunk.emptyVoxel(VoxelIndex.from(1, 1, 1));
+
+        expect(chunk.getBitVoxelCount(VoxelIndex.from(1, 1, 1))).toEqual(0);
+
+        chunk.setBitVoxel(VoxelIndex.from(1, 1, 1, 0, 0, 0));
+        chunk.setBitVoxel(VoxelIndex.from(1, 1, 1, 1, 0, 0));
+        chunk.setBitVoxel(VoxelIndex.from(1, 1, 1, 0, 1, 0));
+        chunk.setBitVoxel(VoxelIndex.from(1, 1, 1, 0, 0, 1));
+        chunk.setBitVoxel(VoxelIndex.from(1, 1, 1, 1, 1, 0));
+        chunk.setBitVoxel(VoxelIndex.from(1, 1, 1, 0, 1, 1));
+        chunk.setBitVoxel(VoxelIndex.from(1, 1, 1, 1, 0, 1));
+        chunk.setBitVoxel(VoxelIndex.from(1, 1, 1, 1, 1, 1));
+
+        expect(chunk.getBitVoxelCount(VoxelIndex.from(1, 1, 1))).toEqual(8);
+    });
 });

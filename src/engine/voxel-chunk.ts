@@ -1,5 +1,6 @@
 import { BitArray } from "../containers/bit-array";
 import { MortonKey } from "../math/morton-key";
+import { BitOps } from "../util/bit-ops";
 import { VoxelIndex } from "./voxel-index";
 
 /**
@@ -148,6 +149,18 @@ export class VoxelChunk {
      */
     public getBitVoxel(key: VoxelIndex): number {
         return this._bitVoxels.bitAt(key.key);
+    }
+
+    /**
+     * Counts the number of SET BitVoxels for a particular Voxel
+     * @param key - The Voxel key to use in local coordinates
+     * @returns number of SET BitVoxels between [0-64] inclusive
+     */
+    public getBitVoxelCount(key: VoxelIndex): number {
+        const vxIndex: number = key.vKey * 2;
+        const elements: Uint32Array = this._bitVoxels.elements;
+
+        return BitOps.popCount(elements[vxIndex]) + BitOps.popCount(elements[vxIndex + 1]);
     }
 
     /**
