@@ -39,7 +39,7 @@ export class VoxelChunk {
      * 
      * Total Meta-Data Bit Size would be SIZE^3 x 16
      */
-    private readonly _metaData: Uint16Array;
+    private readonly _metaData: Uint32Array;
     private readonly _metaDataBuffer: ArrayBuffer;
 
     /**
@@ -59,8 +59,8 @@ export class VoxelChunk {
         this._bitVoxels = new BitArray((size3 * bvxSize3) / 32);
 
         // allocate buffers - bits to bytes
-        this._metaDataBuffer = new ArrayBuffer((size3 * 16) / 8);
-        this._metaData = new Uint16Array(this._metaDataBuffer);
+        this._metaDataBuffer = new ArrayBuffer((size3 * 32) / 8);
+        this._metaData = new Uint32Array(this._metaDataBuffer);
 
         this._key = key;
     }

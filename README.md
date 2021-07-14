@@ -31,7 +31,7 @@ Of course, there are schemes such as Octrees or BSP trees however these schemes 
 
 BitVoxels is an alternative subdivision scheme that stores individual voxels as a single state that can either be turned ON (visible) or OFF (invisible). this allows us to represent BitVoxels with a single bit of information. Under this scheme, to subdivide a standard Voxel by a factor of 4 (4x smaller) requires just 64 bits of data, 1 bit per BitVoxel.
 
-This framework uses 4x subdivision, hence each standard Voxel stores 64 BitVoxel states and each Voxel stores an additional 16 bits for arbitrary meta-data. Under this scheme, each Voxel requires a total of 80 bits or 10 bytes worth of data. During rendering, the BitVoxels simply inherit the meta-data from the parent Voxel.
+This framework uses 4x subdivision, hence each standard Voxel stores 64 BitVoxel states and each Voxel stores an additional 32 bits for arbitrary meta-data. Under this scheme, each Voxel requires a total of 96 bits or 12 bytes worth of data. During rendering, the BitVoxels simply inherit the meta-data from the parent Voxel.
 
 It is not an optimal solution, however we believe the scheme has fair tradeoffs compared to alternatives.
 
