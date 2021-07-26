@@ -8,9 +8,9 @@ import { VoxelIndex } from "./voxel-index";
  * location in a 3D Voxel map. The internals are designed to be easy to transmit and
  * store in a virtual server or on local disk.
  * 
- * VoxelChunk stores 64 Voxels where each voxel contains 80 bits of data
+ * VoxelChunk stores 64 Voxels where each voxel contains 96 bits of data
  *  - 64 bits are the BitVoxel states that dictates how geometry is drawn
- *  - 16 bits are user-defined meta-data that can be stored on a per-voxel basis
+ *  - 32 bits are user-defined meta-data that can be stored on a per-voxel basis
  * 
  * Each VoxelChunk stores 64 voxels and 4096 bit-voxels. Geometry is generated according
  * to the makeup of the bit-voxels which provides 2^64 different geometry configurations on

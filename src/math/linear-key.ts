@@ -212,4 +212,9 @@ export class LinearKey implements Key {
 
         return this.x === other.x && this.y === other.y && this.z === other.z;
     }
+
+    /* istanbul ignore next */
+    toString(): string {
+        return "LinearKey - key:" + this.key + " x:" + this.x + " y:" + this.y + " z:" + this.z;
+    }
 }

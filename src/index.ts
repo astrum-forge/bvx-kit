@@ -14,5 +14,8 @@ export { BitOps } from "./util/bit-ops";
 export { VoxelWorld } from "./engine/voxel-world";
 export { VoxelChunk } from "./engine/voxel-chunk";
 export { VoxelIndex } from "./engine/voxel-index";
+export { WorldIndex } from "./engine/world-index";
 export { VoxelGeometry } from "./engine/geometry/voxel-geometry";
 export { VoxelFaceGeometry } from "./engine/geometry/voxel-face-geometry";
+export { VoxelRay } from "./engine/raycaster/voxel-ray";
+export { VoxelRaycaster } from "./engine/raycaster/voxel-raycaster";

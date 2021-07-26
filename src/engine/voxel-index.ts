@@ -161,4 +161,9 @@ export class VoxelIndex implements Key {
     clone(): VoxelIndex {
         return new VoxelIndex(this._key);
     }
+
+    /* istanbul ignore next */
+    toString(): string {
+        return "VoxelIndex - vkey:" + this.vKey + " vx:" + this.vx + " vy:" + this.vy + " vz:" + this.vz + " bx:" + this.bx + " by:" + this.by + " bz:" + this.bz;
+    }
 }

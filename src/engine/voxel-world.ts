@@ -1,5 +1,6 @@
 import { HashGrid } from "../containers/hash-grid";
 import { MortonKey } from "../math/morton-key";
+import { VoxelRaycaster } from "./raycaster/voxel-raycaster";
 import { VoxelChunk } from "./voxel-chunk";
 
 /**
@@ -24,11 +25,22 @@ export class VoxelWorld {
      * MortonKey and stores instances of VoxelChunk types
      */
     private readonly _voxelChunks: HashGrid<MortonKey, VoxelChunk>;
+    private readonly _voxelRaycaster: VoxelRaycaster;
 
     constructor() {
         // init with 1024 buckets for now, this can be increased to decrease
         // the O(n) search space for more constant lookups at cost of memory
         this._voxelChunks = new HashGrid<MortonKey, VoxelChunk>(1024);
+
+        // provides a Raycaster instance to query the data contained in this world
+        this._voxelRaycaster = new VoxelRaycaster(this);
+    }
+
+    /**
+     * Returns the Raycaster structure that allows picking Voxels using a VoxelRay
+     */
+    public get raycaster(): VoxelRaycaster {
+        return this._voxelRaycaster;
     }
 
     /**
