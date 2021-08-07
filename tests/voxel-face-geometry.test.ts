@@ -1,4 +1,4 @@
-import { VoxelChunk } from "../src/engine/voxel-chunk";
+import { VoxelChunk32 } from "../src/engine/chunks/voxel-chunk-32";
 import { VoxelIndex } from "../src/engine/voxel-index";
 import { MortonKey } from "../src/math/morton-key";
 import { VoxelFaceGeometry } from "../src/engine/geometry/voxel-face-geometry";
@@ -17,7 +17,7 @@ describe('VoxelFaceGeometry', () => {
         expect(geometry.buffer.byteLength).toEqual(4096);
 
         const world = new VoxelWorld();
-        const chunk = new VoxelChunk(MortonKey.from(1, 1, 1));
+        const chunk = new VoxelChunk32(MortonKey.from(1, 1, 1));
 
         world.insert(chunk);
 
@@ -29,7 +29,7 @@ describe('VoxelFaceGeometry', () => {
 
     it('.computeIndices() - non-bounded single BitVoxel', () => {
         const world = new VoxelWorld();
-        const chunk = new VoxelChunk(MortonKey.from(1, 1, 1));
+        const chunk = new VoxelChunk32(MortonKey.from(1, 1, 1));
 
         world.insert(chunk);
 
@@ -52,7 +52,7 @@ describe('VoxelFaceGeometry', () => {
 
     it('.computeIndices() - surrounded BitVoxel', () => {
         const world = new VoxelWorld();
-        const chunk = new VoxelChunk(MortonKey.from(1, 1, 1));
+        const chunk = new VoxelChunk32(MortonKey.from(1, 1, 1));
 
         world.insert(chunk);
 
@@ -94,7 +94,7 @@ describe('VoxelFaceGeometry', () => {
 
     it('.computeIndices() - neighbour tolerance bitvoxels', () => {
         const world = new VoxelWorld();
-        const chunk = new VoxelChunk(MortonKey.from(1, 1, 1));
+        const chunk = new VoxelChunk32(MortonKey.from(1, 1, 1));
 
         world.insert(chunk);
 
@@ -136,7 +136,7 @@ describe('VoxelFaceGeometry', () => {
 
     it('.computeIndices() - edge-chunk neighbour tolerance bitvoxels', () => {
         const world = new VoxelWorld();
-        const chunk = new VoxelChunk(MortonKey.from(1, 1, 1));
+        const chunk = new VoxelChunk32(MortonKey.from(1, 1, 1));
 
         world.insert(chunk);
 

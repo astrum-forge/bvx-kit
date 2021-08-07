@@ -1,7 +1,7 @@
 import { HashGrid } from "../containers/hash-grid";
 import { MortonKey } from "../math/morton-key";
 import { VoxelRaycaster } from "./raycaster/voxel-raycaster";
-import { VoxelChunk } from "./voxel-chunk";
+import { VoxelChunk } from "./chunks/voxel-chunk";
 
 /**
  * VoxelWorld manages a single world instance of a collection of Voxels.

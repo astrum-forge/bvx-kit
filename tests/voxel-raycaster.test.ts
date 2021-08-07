@@ -1,4 +1,4 @@
-import { VoxelChunk } from "../src/engine/voxel-chunk";
+import { VoxelChunk32 } from "../src/engine/chunks/voxel-chunk-32";
 import { VoxelWorld } from "../src/engine/voxel-world";
 import { MortonKey } from "../src/math/morton-key";
 import { VoxelRay } from "../src/engine/raycaster/voxel-ray";
@@ -11,7 +11,7 @@ import { WorldIndex } from "../src/engine/world-index";
 describe('VoxelRaycaster', () => {
     const index = VoxelIndex.from(1, 1, 1, 1, 1, 1);
 
-    const chunk = new VoxelChunk(MortonKey.from(0, 0, 0));
+    const chunk = new VoxelChunk32(MortonKey.from(0, 0, 0));
     const world = new VoxelWorld();
     world.insert(chunk);
 

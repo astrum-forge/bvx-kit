@@ -12,7 +12,12 @@ export { BitOps } from "./util/bit-ops";
 
 // export engine
 export { VoxelWorld } from "./engine/voxel-world";
-export { VoxelChunk } from "./engine/voxel-chunk";
+export { BVXLayer } from "./engine/layer/bvx-layer";
+export { VoxelChunk } from "./engine/chunks/voxel-chunk";
+export { VoxelChunk0 } from "./engine/chunks/voxel-chunk-0";
+export { VoxelChunk8 } from "./engine/chunks/voxel-chunk-8";
+export { VoxelChunk16 } from "./engine/chunks/voxel-chunk-16";
+export { VoxelChunk32 } from "./engine/chunks/voxel-chunk-32";
 export { VoxelIndex } from "./engine/voxel-index";
 export { WorldIndex } from "./engine/world-index";
 export { VoxelGeometry } from "./engine/geometry/voxel-geometry";

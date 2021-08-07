@@ -1,4 +1,5 @@
-import { VoxelChunk } from "../src/engine/voxel-chunk";
+import { VoxelChunk } from "../src/engine/chunks/voxel-chunk";
+import { VoxelChunk32 } from "../src/engine/chunks/voxel-chunk-32";
 import { VoxelIndex } from "../src/engine/voxel-index";
 import { MortonKey } from "../src/math/morton-key";
 
@@ -8,14 +9,14 @@ import { MortonKey } from "../src/math/morton-key";
 describe('VoxelChunk', () => {
 
     it('.setMetaData() .getMetaData() - ensure meta-data can be set and returned correctly', () => {
-        const chunk = new VoxelChunk(MortonKey.from(0, 0, 0));
+        const chunk = new VoxelChunk32(MortonKey.from(0, 0, 0));
 
         let metacount: number = 1111;
 
         // loop for every voxel and se meta-data for every voxel
-        for (let vx: number = 0; vx < VoxelChunk.SIZE; vx++) {
-            for (let vy: number = 0; vy < VoxelChunk.SIZE; vy++) {
-                for (let vz: number = 0; vz < VoxelChunk.SIZE; vz++) {
+        for (let vx: number = 0; vx < VoxelChunk.DIMS; vx++) {
+            for (let vy: number = 0; vy < VoxelChunk.DIMS; vy++) {
+                for (let vz: number = 0; vz < VoxelChunk.DIMS; vz++) {
                     // set meta-data
                     chunk.setMetaData(VoxelIndex.from(vx, vy, vz, 0, 0, 0), metacount);
 
@@ -27,9 +28,9 @@ describe('VoxelChunk', () => {
         metacount = 1111;
 
         // get and compare the meta-data for every voxel
-        for (let vx: number = 0; vx < VoxelChunk.SIZE; vx++) {
-            for (let vy: number = 0; vy < VoxelChunk.SIZE; vy++) {
-                for (let vz: number = 0; vz < VoxelChunk.SIZE; vz++) {
+        for (let vx: number = 0; vx < VoxelChunk.DIMS; vx++) {
+            for (let vy: number = 0; vy < VoxelChunk.DIMS; vy++) {
+                for (let vz: number = 0; vz < VoxelChunk.DIMS; vz++) {
                     // set meta-data
                     const meta = chunk.getMetaData(VoxelIndex.from(vx, vy, vz, 0, 0, 0));
 
@@ -42,7 +43,7 @@ describe('VoxelChunk', () => {
     });
 
     it('.setBitVoxel() .unsetBitVoxel() .toggleBitVoxel() .getBitVoxel() - ensure BitVoxels can be set correctly', () => {
-        const chunk = new VoxelChunk(MortonKey.from(0, 0, 0));
+        const chunk = new VoxelChunk32(MortonKey.from(0, 0, 0));
 
         // ensure default chunk BitVoxel is zero
         for (let i: number = 0; i < 4096; i++) {
@@ -106,23 +107,23 @@ describe('VoxelChunk', () => {
     });
 
     it('.fillVoxel() .emptyVoxel() - ensure correct voxels get filled & emptied', () => {
-        const chunk = new VoxelChunk(MortonKey.from(0, 0, 0));
+        const chunk = new VoxelChunk32(MortonKey.from(0, 0, 0));
 
         let iterations = 0;
 
         // do the fill operations
-        for (let vx: number = 0; vx < VoxelChunk.BVX_SUBDIV; vx++) {
-            for (let vy: number = 0; vy < VoxelChunk.BVX_SUBDIV; vy++) {
-                for (let vz: number = 0; vz < VoxelChunk.BVX_SUBDIV; vz++) {
+        for (let vx: number = 0; vx < VoxelChunk.DIMS; vx++) {
+            for (let vy: number = 0; vy < VoxelChunk.DIMS; vy++) {
+                for (let vz: number = 0; vz < VoxelChunk.DIMS; vz++) {
                     chunk.fillVoxel(VoxelIndex.from(vx, vy, vz, 0, 0, 0));
 
                     iterations++;
 
                     expect(chunk.length).toEqual(iterations * 64);
 
-                    for (let x: number = 0; x < VoxelChunk.BVX_SUBDIV; x++) {
-                        for (let y: number = 0; y < VoxelChunk.BVX_SUBDIV; y++) {
-                            for (let z: number = 0; z < VoxelChunk.BVX_SUBDIV; z++) {
+                    for (let x: number = 0; x < VoxelChunk.DIMS; x++) {
+                        for (let y: number = 0; y < VoxelChunk.DIMS; y++) {
+                            for (let z: number = 0; z < VoxelChunk.DIMS; z++) {
                                 expect(chunk.getBitVoxel(VoxelIndex.from(vx, vy, vz, x, y, z))).toEqual(1);
                             }
                         }
@@ -132,18 +133,18 @@ describe('VoxelChunk', () => {
         }
 
         // do the empty operations
-        for (let vx: number = 0; vx < VoxelChunk.BVX_SUBDIV; vx++) {
-            for (let vy: number = 0; vy < VoxelChunk.BVX_SUBDIV; vy++) {
-                for (let vz: number = 0; vz < VoxelChunk.BVX_SUBDIV; vz++) {
+        for (let vx: number = 0; vx < VoxelChunk.DIMS; vx++) {
+            for (let vy: number = 0; vy < VoxelChunk.DIMS; vy++) {
+                for (let vz: number = 0; vz < VoxelChunk.DIMS; vz++) {
                     chunk.emptyVoxel(VoxelIndex.from(vx, vy, vz, 0, 0, 0));
 
                     iterations--;
 
                     expect(chunk.length).toEqual(iterations * 64);
 
-                    for (let x: number = 0; x < VoxelChunk.BVX_SUBDIV; x++) {
-                        for (let y: number = 0; y < VoxelChunk.BVX_SUBDIV; y++) {
-                            for (let z: number = 0; z < VoxelChunk.BVX_SUBDIV; z++) {
+                    for (let x: number = 0; x < VoxelChunk.DIMS; x++) {
+                        for (let y: number = 0; y < VoxelChunk.DIMS; y++) {
+                            for (let z: number = 0; z < VoxelChunk.DIMS; z++) {
                                 expect(chunk.getBitVoxel(VoxelIndex.from(vx, vy, vz, x, y, z))).toEqual(0);
                             }
                         }
@@ -154,7 +155,7 @@ describe('VoxelChunk', () => {
     });
 
     it('.getBitVoxelCount() - ensure BitVoxels can be counted correctly', () => {
-        const chunk = new VoxelChunk(MortonKey.from(0, 0, 0));
+        const chunk = new VoxelChunk32(MortonKey.from(0, 0, 0));
 
         chunk.fillVoxel(VoxelIndex.from(1, 1, 1));
 

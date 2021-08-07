@@ -1,4 +1,4 @@
-import { VoxelChunk } from "../src/engine/voxel-chunk";
+import { VoxelChunk32 } from "../src/engine/chunks/voxel-chunk-32";
 import { VoxelWorld } from "../src/engine/voxel-world";
 import { MortonKey } from "../src/math/morton-key";
 
@@ -7,7 +7,7 @@ import { MortonKey } from "../src/math/morton-key";
  */
 describe('VoxelWorld', () => {
 
-    const def = new VoxelChunk(MortonKey.from(0, 0, 0));
+    const def = new VoxelChunk32(MortonKey.from(0, 0, 0));
 
     it('.insert() .get() .getOpt() .remove() - ensure can insert and get and remove properly', () => {
         const world = new VoxelWorld();
@@ -19,10 +19,10 @@ describe('VoxelWorld', () => {
         expect(world.get(MortonKey.from(4, 4, 4))).toBe(null);
 
         // generate dummy VoxelChunks to insert
-        const one = new VoxelChunk(MortonKey.from(1, 1, 1));
-        const two = new VoxelChunk(MortonKey.from(2, 2, 2));
-        const three = new VoxelChunk(MortonKey.from(3, 3, 3));
-        const four = new VoxelChunk(MortonKey.from(4, 4, 4));
+        const one = new VoxelChunk32(MortonKey.from(1, 1, 1));
+        const two = new VoxelChunk32(MortonKey.from(2, 2, 2));
+        const three = new VoxelChunk32(MortonKey.from(3, 3, 3));
+        const four = new VoxelChunk32(MortonKey.from(4, 4, 4));
 
         // insert items
         world.insert(one);

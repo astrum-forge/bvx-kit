@@ -1,6 +1,7 @@
 import { MortonKey } from "../../math/morton-key";
 import { BitOps } from "../../util/bit-ops";
-import { VoxelChunk } from "../voxel-chunk";
+import { VoxelChunk } from "../chunks/voxel-chunk";
+import { VoxelChunk0 } from "../chunks/voxel-chunk-0";
 import { VoxelIndex } from "../voxel-index";
 import { VoxelWorld } from "../voxel-world";
 import { VoxelGeometry } from "./voxel-geometry";
@@ -40,7 +41,7 @@ export class VoxelFaceGeometry extends VoxelGeometry {
     /**
      * Used in-case the Neighbour chunk we want is not actually defined correctly
      */
-    private static readonly TMP_CHUNK: VoxelChunk = new VoxelChunk(VoxelFaceGeometry.TMP_MK);
+    private static readonly TMP_CHUNK: VoxelChunk = new VoxelChunk0(VoxelFaceGeometry.TMP_MK);
 
     public computeIndices(center: VoxelChunk, world: VoxelWorld): void {
         // reset the internal buffer

@@ -1,5 +1,5 @@
 import { MortonKey } from "../math/morton-key";
-import { VoxelChunk } from "./voxel-chunk";
+import { VoxelChunk } from "./chunks/voxel-chunk";
 import { VoxelIndex } from "./voxel-index";
 
 /**
@@ -32,22 +32,21 @@ export class WorldIndex {
     public static from(worldX: number, worldY: number, worldZ: number, optres: WorldIndex | null = null): WorldIndex {
         optres = optres || new WorldIndex();
 
-        const chunkSize: number = VoxelChunk.SIZE;
-        const bvxSubdiv: number = VoxelChunk.BVX_SUBDIV;
+        const chunkSize: number = VoxelChunk.DIMS;
 
-        const worldSize: number = chunkSize * bvxSubdiv;
+        const worldSize: number = chunkSize * chunkSize;
 
         const chunkX: number = (worldX / worldSize);
         const chunkY: number = (worldY / worldSize);
         const chunkZ: number = (worldZ / worldSize);
 
-        const voxelX: number = (worldX % worldSize) / bvxSubdiv;
-        const voxelY: number = (worldY % worldSize) / bvxSubdiv;
-        const voxelZ: number = (worldZ % worldSize) / bvxSubdiv;
+        const voxelX: number = (worldX % worldSize) / chunkSize;
+        const voxelY: number = (worldY % worldSize) / chunkSize;
+        const voxelZ: number = (worldZ % worldSize) / chunkSize;
 
-        const bvX: number = (worldX % bvxSubdiv);
-        const bvY: number = (worldY % bvxSubdiv);
-        const bvZ: number = (worldZ % bvxSubdiv);
+        const bvX: number = (worldX % chunkSize);
+        const bvY: number = (worldY % chunkSize);
+        const bvZ: number = (worldZ % chunkSize);
 
         // insert the local coordinates and return
         MortonKey.from(chunkX | 0, chunkY | 0, chunkZ | 0, optres._chunkIndex);

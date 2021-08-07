@@ -1,5 +1,4 @@
-import { MortonKey } from "../../math/morton-key";
-import { VoxelChunk } from "../voxel-chunk";
+import { VoxelChunk } from "../chunks/voxel-chunk";
 import { VoxelWorld } from "../voxel-world";
 import { WorldIndex } from "../world-index";
 import { VoxelRay } from "./voxel-ray";

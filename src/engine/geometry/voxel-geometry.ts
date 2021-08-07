@@ -1,5 +1,6 @@
 import { BitOps } from "../../util/bit-ops";
-import { VoxelChunk } from "../voxel-chunk";
+import { VoxelChunk } from "../chunks/voxel-chunk";
+import { BVXLayer } from "../layer/bvx-layer";
 import { VoxelWorld } from "../voxel-world";
 
 /**
@@ -22,12 +23,9 @@ export abstract class VoxelGeometry {
     private readonly _geometryIndicesBuffer: ArrayBuffer;
 
     constructor() {
-        const size: number = VoxelChunk.SIZE;
-        const bvxSize: number = VoxelChunk.BVX_SUBDIV;
-
         // we require 8 bits max per geometry index
         // each bit-voxel has its own geometry index
-        this._geometryIndicesBuffer = new ArrayBuffer((size * size * size) * (bvxSize * bvxSize * bvxSize));
+        this._geometryIndicesBuffer = new ArrayBuffer(BVXLayer.SIZE);
         this._geometryIndices = new Uint8Array(this._geometryIndicesBuffer);
     }
 
