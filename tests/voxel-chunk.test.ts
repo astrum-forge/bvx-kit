@@ -1,4 +1,7 @@
 import { VoxelChunk } from "../src/engine/chunks/voxel-chunk";
+import { VoxelChunk0 } from "../src/engine/chunks/voxel-chunk-0";
+import { VoxelChunk8 } from "../src/engine/chunks/voxel-chunk-8";
+import { VoxelChunk16 } from "../src/engine/chunks/voxel-chunk-16";
 import { VoxelChunk32 } from "../src/engine/chunks/voxel-chunk-32";
 import { VoxelIndex } from "../src/engine/voxel-index";
 import { MortonKey } from "../src/math/morton-key";
@@ -8,7 +11,7 @@ import { MortonKey } from "../src/math/morton-key";
  */
 describe('VoxelChunk', () => {
 
-    it('.setMetaData() .getMetaData() - ensure meta-data can be set and returned correctly', () => {
+    it('.setMetaData() .getMetaData() - ensure 32 bit meta-data can be set and returned correctly', () => {
         const chunk = new VoxelChunk32(MortonKey.from(0, 0, 0));
 
         let metacount: number = 1111;
@@ -35,6 +38,113 @@ describe('VoxelChunk', () => {
                     const meta = chunk.getMetaData(VoxelIndex.from(vx, vy, vz, 0, 0, 0));
 
                     expect(meta).toEqual(metacount);
+
+                    metacount++;
+                }
+            }
+        }
+    });
+
+    it('.setMetaData() .getMetaData() - ensure 16 bit meta-data can be set and returned correctly', () => {
+        const chunk = new VoxelChunk16(MortonKey.from(0, 0, 0));
+
+        let metacount: number = 1111;
+
+        // loop for every voxel and se meta-data for every voxel
+        for (let vx: number = 0; vx < VoxelChunk.DIMS; vx++) {
+            for (let vy: number = 0; vy < VoxelChunk.DIMS; vy++) {
+                for (let vz: number = 0; vz < VoxelChunk.DIMS; vz++) {
+                    // set meta-data
+                    chunk.setMetaData(VoxelIndex.from(vx, vy, vz, 0, 0, 0), metacount);
+
+                    metacount++;
+                }
+            }
+        }
+
+        metacount = 1111;
+
+        // get and compare the meta-data for every voxel
+        for (let vx: number = 0; vx < VoxelChunk.DIMS; vx++) {
+            for (let vy: number = 0; vy < VoxelChunk.DIMS; vy++) {
+                for (let vz: number = 0; vz < VoxelChunk.DIMS; vz++) {
+                    // set meta-data
+                    const meta = chunk.getMetaData(VoxelIndex.from(vx, vy, vz, 0, 0, 0));
+
+                    expect(meta).toEqual(metacount);
+
+                    metacount++;
+                }
+            }
+        }
+    });
+
+    it('.setMetaData() .getMetaData() - ensure 8 bit meta-data can be set and returned correctly', () => {
+        const chunk = new VoxelChunk8(MortonKey.from(0, 0, 0));
+
+        let metacount: number = 0;
+
+        // loop for every voxel and se meta-data for every voxel
+        for (let vx: number = 0; vx < VoxelChunk.DIMS; vx++) {
+            for (let vy: number = 0; vy < VoxelChunk.DIMS; vy++) {
+                for (let vz: number = 0; vz < VoxelChunk.DIMS; vz++) {
+                    // set meta-data
+                    chunk.setMetaData(VoxelIndex.from(vx, vy, vz, 0, 0, 0), metacount);
+
+                    metacount++;
+                }
+            }
+        }
+
+        metacount = 0;
+
+        // get and compare the meta-data for every voxel
+        for (let vx: number = 0; vx < VoxelChunk.DIMS; vx++) {
+            for (let vy: number = 0; vy < VoxelChunk.DIMS; vy++) {
+                for (let vz: number = 0; vz < VoxelChunk.DIMS; vz++) {
+                    // set meta-data
+                    const meta = chunk.getMetaData(VoxelIndex.from(vx, vy, vz, 0, 0, 0));
+
+                    if (meta > 255) {
+                        expect(meta).toEqual(255);
+                    }
+                    else {
+                        expect(meta).toEqual(metacount);
+                    }
+
+                    metacount++;
+                }
+            }
+        }
+    });
+
+    it('.setMetaData() .getMetaData() - ensure 0 bit meta-data can be set and returned correctly', () => {
+        const chunk = new VoxelChunk0(MortonKey.from(0, 0, 0));
+
+        let metacount: number = 0;
+
+        // loop for every voxel and se meta-data for every voxel
+        for (let vx: number = 0; vx < VoxelChunk.DIMS; vx++) {
+            for (let vy: number = 0; vy < VoxelChunk.DIMS; vy++) {
+                for (let vz: number = 0; vz < VoxelChunk.DIMS; vz++) {
+                    // set meta-data
+                    chunk.setMetaData(VoxelIndex.from(vx, vy, vz, 0, 0, 0), metacount);
+
+                    metacount++;
+                }
+            }
+        }
+
+        metacount = 0;
+
+        // get and compare the meta-data for every voxel
+        for (let vx: number = 0; vx < VoxelChunk.DIMS; vx++) {
+            for (let vy: number = 0; vy < VoxelChunk.DIMS; vy++) {
+                for (let vz: number = 0; vz < VoxelChunk.DIMS; vz++) {
+                    // set meta-data
+                    const meta = chunk.getMetaData(VoxelIndex.from(vx, vy, vz, 0, 0, 0));
+
+                    expect(meta).toEqual(0);
 
                     metacount++;
                 }
