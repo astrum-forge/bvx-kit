@@ -14,7 +14,7 @@
     "build": "npm run build-ts",
     "watch": "watch 'npm run build' ./src",
     "clean:build": "npm run clean && npm install && npm run build",
-    "doc": "rm -rf docs && npx typedoc && cp -R graphics/ docs/graphics/ && cp -R badges/ docs/badges/"
+    "doc": "rm -rf docs && npx typedoc && cp -R graphics/ docs/graphics/ && cp -R badges/ docs/badges/ && cp LICENSE docs/"
   },
   "repository": {
     "type": "git",
