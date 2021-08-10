@@ -25,6 +25,7 @@ _**BitVoxel Engine**_ detaches Voxel meta-data and Rendering state data into abs
 -   BitVoxel State Layer requires **1** bit per BitVoxel
 -   Written in TypeScript with no external dependencies
 -   Designed for Robustness & Performance with 100% unit tested code
+-   Documented [Code & API](https://ovistek.github.io/bvx.ts/)
 -   Permissive [MIT License](LICENSE)
 
 ### _**Installation**_
