@@ -13,7 +13,19 @@
 
 * * *
 
-_**BitVoxels**_ is a Voxel subdivision scheme that trades flexibility for memory efficiency. Under the scheme, Voxels are subdivided into _**BitVoxel**_ states with inherited meta-data.
+_**BitVoxel Engine**_ detaches Voxel meta-data and Rendering state data into abstracted layers. This allows rendering smaller voxels with inherited meta-data without subdividing the Voxel layer.
+
+<h3 align="center">
+  <img src="graphics/info.jpg?raw=true" alt="BitVoxel Layer Composition" width="800">
+</h3>
+
+### _**About**_
+
+-   Voxel Meta-Data Layer requires **0**, **8**, **16** or **32** bit per Voxel
+-   BitVoxel State Layer requires **1** bit per BitVoxel
+-   Written in TypeScript with no external dependencies
+-   Designed for Robustness & Performance with 100% unit tested code
+-   Permissive [MIT License](LICENSE)
 
 ### _**Installation**_
 
@@ -23,23 +35,24 @@ _**BitVoxels**_ is a Voxel subdivision scheme that trades flexibility for memory
 npm install @ovistek/bvx.ts
 ```
 
-### _**About**_
+### _**Quick Setup**_
 
-Subdividing Voxels is difficult. Think about games like Minecraft and what it would take to make those voxels smaller. Just by reducing the Voxel size by a factor of 2 (2x smaller Voxels) would require 8x more memory and a reduction of the Voxel size by a factor of 4 (4x smaller Voxels) would require a whopping 64x more memory. This is because subdividing Voxels in a grid-like manner requires O(n^3) times more memory (Cubic growth).
+```TypeScript
+import { MortonKey, VoxelChunk, VoxelWorld } from '@ovistek/bvx.ts';
 
-Of course, there are schemes such as Octrees or BSP trees however these schemes often require additional memory, are not easy to implement and have unpredictable memory costs. Think of the checkerboard pattern encoded using an Octree.
+// create a new world instance to manage our Voxels
+const world:VoxelWorld = new VoxelWorld();
 
-BitVoxels is an alternative subdivision scheme that stores individual voxels as a single state that can either be turned ON (visible) or OFF (invisible). this allows us to represent BitVoxels with a single bit of information. Under this scheme, to subdivide a standard Voxel by a factor of 4 (4x smaller) requires just 64 bits of data, 1 bit per BitVoxel.
+// create a new VoxelChunk at world position (x=1,y=1,z=1)
+const chunk:VoxelChunk = new VoxelChunk(MortonKey.from(1,1,1));
 
-This framework uses 4x subdivision, hence each standard Voxel stores 64 BitVoxel states and each Voxel stores an additional 32 bits for arbitrary meta-data. Under this scheme, each Voxel requires a total of 96 bits or 12 bytes worth of data. During rendering, the BitVoxels simply inherit the meta-data from the parent Voxel.
+// insert the chunk into the world
+world.insert(chunk);
 
-It is not an optimal solution, however we believe the scheme has fair tradeoffs compared to alternatives.
+// return a previously inserted VoxelChunk instance from position (x=1,y=1,z=1)
+const prevChunk:VoxelChunk | null = world.get(MortonKey.from(1,1,1));
 
-### _**Before & After 4x BitVoxel Subdivision**_
-
--   Example images are using [bvx-glut](https://github.com/OvisTek/bvx-glut) Geometry Lookup Table (LUT) for rendering.
-
-<h3 align="center">
-  <img src="graphics/screen_1.png?raw=true" alt="Before BitVoxel Subdivision" width="300">
-  <img src="graphics/screen_0.png?raw=true" alt="4x BitVoxel Subdivision" width="300">
-</h3>
+if (prevChunk !== null) {
+  // do something with VoxelChunk
+}
+```

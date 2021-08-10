@@ -13,7 +13,7 @@ import { VoxelIndex } from "../voxel-index";
  * to the makeup of the bit-voxels which provides 2^64 different geometry configurations on
  * a per Voxel basis
  */
-export abstract class VoxelChunk {
+export class VoxelChunk {
     public static readonly DIMS: number = 4;
     public static readonly SIZE: number = VoxelChunk.DIMS * VoxelChunk.DIMS * VoxelChunk.DIMS;
 
@@ -63,14 +63,14 @@ export abstract class VoxelChunk {
      * @param key - The Voxel Index to set the meta-data
      * @param meta - The meta-data to set
      */
-    public abstract setMetaData(key: VoxelIndex, meta: number): void;
+    public setMetaData(key: VoxelIndex, meta: number): void { };
 
     /**
      * Returns the encoded meta-data for the provided Voxel Index
      * @param key - The Voxel Index
      * @returns - The encoded meta-data
      */
-    public abstract getMetaData(key: VoxelIndex): number;
+    public getMetaData(key: VoxelIndex): number { return 0; };
 
     /**
      * Sets the BitVoxel to the 1/ON state at provided position.

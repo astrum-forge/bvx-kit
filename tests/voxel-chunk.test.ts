@@ -1,5 +1,4 @@
 import { VoxelChunk } from "../src/engine/chunks/voxel-chunk";
-import { VoxelChunk0 } from "../src/engine/chunks/voxel-chunk-0";
 import { VoxelChunk8 } from "../src/engine/chunks/voxel-chunk-8";
 import { VoxelChunk16 } from "../src/engine/chunks/voxel-chunk-16";
 import { VoxelChunk32 } from "../src/engine/chunks/voxel-chunk-32";
@@ -119,7 +118,7 @@ describe('VoxelChunk', () => {
     });
 
     it('.setMetaData() .getMetaData() - ensure 0 bit meta-data can be set and returned correctly', () => {
-        const chunk = new VoxelChunk0(MortonKey.from(0, 0, 0));
+        const chunk = new VoxelChunk(MortonKey.from(0, 0, 0));
 
         let metacount: number = 0;
 

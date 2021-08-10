@@ -1,0 +1,754 @@
+<!doctype html>
+<html class="default no-js">
+<head>
+	<meta charset="utf-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<title>VoxelChunk | @ovistek/bvx.ts</title>
+	<meta name="description" content="Documentation for @ovistek/bvx.ts">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<link rel="stylesheet" href="../assets/css/main.css">
+	<script async src="../assets/js/search.js" id="search-script"></script>
+</head>
+<body>
+<header>
+	<div class="tsd-page-toolbar">
+		<div class="container">
+			<div class="table-wrap">
+				<div class="table-cell" id="tsd-search" data-index="../assets/js/search.json" data-base="..">
+					<div class="field">
+						<label for="tsd-search-field" class="tsd-widget search no-caption">Search</label>
+						<input id="tsd-search-field" type="text" />
+					</div>
+					<ul class="results">
+						<li class="state loading">Preparing search index...</li>
+						<li class="state failure">The search index is not available</li>
+					</ul>
+					<a href="../index.html" class="title">@ovistek/bvx.ts</a>
+				</div>
+				<div class="table-cell" id="tsd-widgets">
+					<div id="tsd-filter">
+						<a href="#" class="tsd-widget options no-caption" data-toggle="options">Options</a>
+						<div class="tsd-filter-group">
+							<div class="tsd-select" id="tsd-filter-visibility">
+								<span class="tsd-select-label">All</span>
+								<ul class="tsd-select-list">
+									<li data-value="public">Public</li>
+									<li data-value="protected">Public/Protected</li>
+									<li data-value="private" class="selected">All</li>
+								</ul>
+							</div>
+							<input type="checkbox" id="tsd-filter-inherited" checked />
+							<label class="tsd-widget" for="tsd-filter-inherited">Inherited</label>
+							<input type="checkbox" id="tsd-filter-externals" checked />
+							<label class="tsd-widget" for="tsd-filter-externals">Externals</label>
+						</div>
+					</div>
+					<a href="#" class="tsd-widget menu no-caption" data-toggle="menu">Menu</a>
+				</div>
+			</div>
+		</div>
+	</div>
+	<div class="tsd-page-title">
+		<div class="container">
+			<ul class="tsd-breadcrumb">
+				<li>
+					<a href="../modules.html">@ovistek/bvx.ts</a>
+				</li>
+				<li>
+					<a href="VoxelChunk.html">VoxelChunk</a>
+				</li>
+			</ul>
+			<h1>Class VoxelChunk</h1>
+		</div>
+	</div>
+</header>
+<div class="container container-main">
+	<div class="row">
+		<div class="col-8 col-content">
+			<section class="tsd-panel tsd-comment">
+				<div class="tsd-comment tsd-typography">
+					<div class="lead">
+						<p>A single VoxelChunk manages a group of voxels and their states for a specific
+							location in a 3D Voxel map. The internals are designed to be easy to transmit and
+						store in a virtual server or on local disk.</p>
+					</div>
+					<p>VoxelChunk stores 64 Voxels where each voxel contains 64 bits of data</p>
+					<p>Each VoxelChunk stores 64 voxels and 4096 bit-voxels. Geometry is generated according
+						to the makeup of the bit-voxels which provides 2^64 different geometry configurations on
+					a per Voxel basis</p>
+				</div>
+			</section>
+			<section class="tsd-panel tsd-hierarchy">
+				<h3>Hierarchy</h3>
+				<ul class="tsd-hierarchy">
+					<li>
+						<span class="target">VoxelChunk</span>
+						<ul class="tsd-hierarchy">
+							<li>
+								<a href="VoxelChunk8.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelChunk8</a>
+							</li>
+							<li>
+								<a href="VoxelChunk16.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelChunk16</a>
+							</li>
+							<li>
+								<a href="VoxelChunk32.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelChunk32</a>
+							</li>
+						</ul>
+					</li>
+				</ul>
+			</section>
+			<section class="tsd-panel-group tsd-index-group">
+				<h2>Index</h2>
+				<section class="tsd-panel tsd-index-panel">
+					<div class="tsd-index-content">
+						<section class="tsd-index-section ">
+							<h3>Constructors</h3>
+							<ul class="tsd-index-list">
+								<li class="tsd-kind-constructor tsd-parent-kind-class"><a href="VoxelChunk.html#constructor" class="tsd-kind-icon">constructor</a></li>
+							</ul>
+						</section>
+						<section class="tsd-index-section ">
+							<h3>Properties</h3>
+							<ul class="tsd-index-list">
+								<li class="tsd-kind-property tsd-parent-kind-class tsd-is-static"><a href="VoxelChunk.html#DIMS" class="tsd-kind-icon">DIMS</a></li>
+								<li class="tsd-kind-property tsd-parent-kind-class tsd-is-static"><a href="VoxelChunk.html#SIZE" class="tsd-kind-icon">SIZE</a></li>
+							</ul>
+						</section>
+						<section class="tsd-index-section ">
+							<h3>Accessors</h3>
+							<ul class="tsd-index-list">
+								<li class="tsd-kind-get-signature tsd-parent-kind-class"><a href="VoxelChunk.html#key" class="tsd-kind-icon">key</a></li>
+								<li class="tsd-kind-get-signature tsd-parent-kind-class"><a href="VoxelChunk.html#layer" class="tsd-kind-icon">layer</a></li>
+								<li class="tsd-kind-get-signature tsd-parent-kind-class"><a href="VoxelChunk.html#length" class="tsd-kind-icon">length</a></li>
+							</ul>
+						</section>
+						<section class="tsd-index-section ">
+							<h3>Methods</h3>
+							<ul class="tsd-index-list">
+								<li class="tsd-kind-method tsd-parent-kind-class"><a href="VoxelChunk.html#cmp" class="tsd-kind-icon">cmp</a></li>
+								<li class="tsd-kind-method tsd-parent-kind-class"><a href="VoxelChunk.html#emptyVoxel" class="tsd-kind-icon">empty<wbr>Voxel</a></li>
+								<li class="tsd-kind-method tsd-parent-kind-class"><a href="VoxelChunk.html#fillVoxel" class="tsd-kind-icon">fill<wbr>Voxel</a></li>
+								<li class="tsd-kind-method tsd-parent-kind-class"><a href="VoxelChunk.html#getBitVoxel" class="tsd-kind-icon">get<wbr>Bit<wbr>Voxel</a></li>
+								<li class="tsd-kind-method tsd-parent-kind-class"><a href="VoxelChunk.html#getBitVoxelCount" class="tsd-kind-icon">get<wbr>Bit<wbr>Voxel<wbr>Count</a></li>
+								<li class="tsd-kind-method tsd-parent-kind-class"><a href="VoxelChunk.html#getMetaData" class="tsd-kind-icon">get<wbr>Meta<wbr>Data</a></li>
+								<li class="tsd-kind-method tsd-parent-kind-class"><a href="VoxelChunk.html#setBitVoxel" class="tsd-kind-icon">set<wbr>Bit<wbr>Voxel</a></li>
+								<li class="tsd-kind-method tsd-parent-kind-class"><a href="VoxelChunk.html#setMetaData" class="tsd-kind-icon">set<wbr>Meta<wbr>Data</a></li>
+								<li class="tsd-kind-method tsd-parent-kind-class"><a href="VoxelChunk.html#toggleBitVoxel" class="tsd-kind-icon">toggle<wbr>Bit<wbr>Voxel</a></li>
+								<li class="tsd-kind-method tsd-parent-kind-class"><a href="VoxelChunk.html#unsetBitVoxel" class="tsd-kind-icon">unset<wbr>Bit<wbr>Voxel</a></li>
+							</ul>
+						</section>
+					</div>
+				</section>
+			</section>
+			<section class="tsd-panel-group tsd-member-group ">
+				<h2>Constructors</h2>
+				<section class="tsd-panel tsd-member tsd-kind-constructor tsd-parent-kind-class">
+					<a name="constructor" class="tsd-anchor"></a>
+					<h3>constructor</h3>
+					<ul class="tsd-signatures tsd-kind-constructor tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon">new <wbr>Voxel<wbr>Chunk<span class="tsd-signature-symbol">(</span>key<span class="tsd-signature-symbol">: </span><a href="MortonKey.html" class="tsd-signature-type" data-tsd-kind="Class">MortonKey</a><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><a href="VoxelChunk.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelChunk</a></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/chunks/voxel-chunk.ts#L32">engine/chunks/voxel-chunk.ts:32</a></li>
+								</ul>
+							</aside>
+							<h4 class="tsd-parameters-title">Parameters</h4>
+							<ul class="tsd-parameters">
+								<li>
+									<h5>key: <a href="MortonKey.html" class="tsd-signature-type" data-tsd-kind="Class">MortonKey</a></h5>
+								</li>
+							</ul>
+							<h4 class="tsd-returns-title">Returns <a href="VoxelChunk.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelChunk</a></h4>
+						</li>
+					</ul>
+				</section>
+			</section>
+			<section class="tsd-panel-group tsd-member-group ">
+				<h2>Properties</h2>
+				<section class="tsd-panel tsd-member tsd-kind-property tsd-parent-kind-class tsd-is-static">
+					<a name="DIMS" class="tsd-anchor"></a>
+					<h3><span class="tsd-flag ts-flagStatic">Static</span> <span class="tsd-flag ts-flagReadonly">Readonly</span> DIMS</h3>
+					<div class="tsd-signature tsd-kind-icon">DIMS<span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol"> = 4</span></div>
+					<aside class="tsd-sources">
+						<ul>
+							<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/chunks/voxel-chunk.ts#L17">engine/chunks/voxel-chunk.ts:17</a></li>
+						</ul>
+					</aside>
+				</section>
+				<section class="tsd-panel tsd-member tsd-kind-property tsd-parent-kind-class tsd-is-static">
+					<a name="SIZE" class="tsd-anchor"></a>
+					<h3><span class="tsd-flag ts-flagStatic">Static</span> <span class="tsd-flag ts-flagReadonly">Readonly</span> SIZE</h3>
+					<div class="tsd-signature tsd-kind-icon">SIZE<span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol"> = ...</span></div>
+					<aside class="tsd-sources">
+						<ul>
+							<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/chunks/voxel-chunk.ts#L18">engine/chunks/voxel-chunk.ts:18</a></li>
+						</ul>
+					</aside>
+				</section>
+			</section>
+			<section class="tsd-panel-group tsd-member-group ">
+				<h2>Accessors</h2>
+				<section class="tsd-panel tsd-member tsd-kind-get-signature tsd-parent-kind-class">
+					<a name="key" class="tsd-anchor"></a>
+					<h3>key</h3>
+					<ul class="tsd-signatures tsd-kind-get-signature tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon"><span class="tsd-signature-symbol">get</span> key<span class="tsd-signature-symbol">(</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><a href="MortonKey.html" class="tsd-signature-type" data-tsd-kind="Class">MortonKey</a></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/chunks/voxel-chunk.ts#L40">engine/chunks/voxel-chunk.ts:40</a></li>
+								</ul>
+							</aside>
+							<div class="tsd-comment tsd-typography">
+								<div class="lead">
+									<p>Returns the Index Key for this VoxelChunk</p>
+								</div>
+							</div>
+							<h4 class="tsd-returns-title">Returns <a href="MortonKey.html" class="tsd-signature-type" data-tsd-kind="Class">MortonKey</a></h4>
+						</li>
+					</ul>
+				</section>
+				<section class="tsd-panel tsd-member tsd-kind-get-signature tsd-parent-kind-class">
+					<a name="layer" class="tsd-anchor"></a>
+					<h3>layer</h3>
+					<ul class="tsd-signatures tsd-kind-get-signature tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon"><span class="tsd-signature-symbol">get</span> layer<span class="tsd-signature-symbol">(</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><a href="BVXLayer.html" class="tsd-signature-type" data-tsd-kind="Class">BVXLayer</a></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/chunks/voxel-chunk.ts#L57">engine/chunks/voxel-chunk.ts:57</a></li>
+								</ul>
+							</aside>
+							<div class="tsd-comment tsd-typography">
+								<div class="lead">
+									<p>Returns the backing BitVoxel layer for this Chunk</p>
+								</div>
+							</div>
+							<h4 class="tsd-returns-title">Returns <a href="BVXLayer.html" class="tsd-signature-type" data-tsd-kind="Class">BVXLayer</a></h4>
+						</li>
+					</ul>
+				</section>
+				<section class="tsd-panel tsd-member tsd-kind-get-signature tsd-parent-kind-class">
+					<a name="length" class="tsd-anchor"></a>
+					<h3>length</h3>
+					<ul class="tsd-signatures tsd-kind-get-signature tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon"><span class="tsd-signature-symbol">get</span> length<span class="tsd-signature-symbol">(</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><span class="tsd-signature-type">number</span></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/chunks/voxel-chunk.ts#L50">engine/chunks/voxel-chunk.ts:50</a></li>
+								</ul>
+							</aside>
+							<div class="tsd-comment tsd-typography">
+								<div class="lead">
+									<p>Counts the number of set BitVoxels contained in this VoxelChunk reference.
+									This uses BitOps.popCount() operation which should compute the results very fast.</p>
+								</div>
+								<p>This is the same property as VoxelChunk.layer.length</p>
+							</div>
+							<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">number</span></h4>
+						</li>
+					</ul>
+				</section>
+			</section>
+			<section class="tsd-panel-group tsd-member-group ">
+				<h2>Methods</h2>
+				<section class="tsd-panel tsd-member tsd-kind-method tsd-parent-kind-class">
+					<a name="cmp" class="tsd-anchor"></a>
+					<h3>cmp</h3>
+					<ul class="tsd-signatures tsd-kind-method tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon">cmp<span class="tsd-signature-symbol">(</span>other<span class="tsd-signature-symbol">: </span><span class="tsd-signature-type">null</span><span class="tsd-signature-symbol"> | </span><a href="VoxelChunk.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelChunk</a><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><span class="tsd-signature-type">boolean</span></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/chunks/voxel-chunk.ts#L147">engine/chunks/voxel-chunk.ts:147</a></li>
+								</ul>
+							</aside>
+							<div class="tsd-comment tsd-typography">
+								<div class="lead">
+									<p>Check to see if VoxelChunk instances match by comparing the keys</p>
+								</div>
+							</div>
+							<h4 class="tsd-parameters-title">Parameters</h4>
+							<ul class="tsd-parameters">
+								<li>
+									<h5>other: <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol"> | </span><a href="VoxelChunk.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelChunk</a></h5>
+									<div class="tsd-comment tsd-typography">
+										<p>the VoxelChunk to compare with</p>
+									</div>
+								</li>
+							</ul>
+							<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">boolean</span></h4>
+							<ul>
+								<li>True if match, false otherwise</li>
+							</ul>
+						</li>
+					</ul>
+				</section>
+				<section class="tsd-panel tsd-member tsd-kind-method tsd-parent-kind-class">
+					<a name="emptyVoxel" class="tsd-anchor"></a>
+					<h3>empty<wbr>Voxel</h3>
+					<ul class="tsd-signatures tsd-kind-method tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon">empty<wbr>Voxel<span class="tsd-signature-symbol">(</span>key<span class="tsd-signature-symbol">: </span><a href="VoxelIndex.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelIndex</a><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><span class="tsd-signature-type">void</span></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/chunks/voxel-chunk.ts#L100">engine/chunks/voxel-chunk.ts:100</a></li>
+								</ul>
+							</aside>
+							<div class="tsd-comment tsd-typography">
+								<div class="lead">
+									<p>Empties the provided Voxel with disabled BitVoxels. This is
+										much faster than individually emptying a Voxel using a looped coordinate.
+									This is the same property as VoxelChunk.layer.empty</p>
+								</div>
+							</div>
+							<h4 class="tsd-parameters-title">Parameters</h4>
+							<ul class="tsd-parameters">
+								<li>
+									<h5>key: <a href="VoxelIndex.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelIndex</a></h5>
+									<div class="tsd-comment tsd-typography">
+										<p>The Voxel Index</p>
+									</div>
+								</li>
+							</ul>
+							<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4>
+						</li>
+					</ul>
+				</section>
+				<section class="tsd-panel tsd-member tsd-kind-method tsd-parent-kind-class">
+					<a name="fillVoxel" class="tsd-anchor"></a>
+					<h3>fill<wbr>Voxel</h3>
+					<ul class="tsd-signatures tsd-kind-method tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon">fill<wbr>Voxel<span class="tsd-signature-symbol">(</span>key<span class="tsd-signature-symbol">: </span><a href="VoxelIndex.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelIndex</a><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><span class="tsd-signature-type">void</span></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/chunks/voxel-chunk.ts#L90">engine/chunks/voxel-chunk.ts:90</a></li>
+								</ul>
+							</aside>
+							<div class="tsd-comment tsd-typography">
+								<div class="lead">
+									<p>Fills the provided Voxel with enabled BitVoxels. This is much faster
+										than individually filling a Voxel using a looped coordinate.
+									This is the same property as VoxelChunk.layer.fill</p>
+								</div>
+							</div>
+							<h4 class="tsd-parameters-title">Parameters</h4>
+							<ul class="tsd-parameters">
+								<li>
+									<h5>key: <a href="VoxelIndex.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelIndex</a></h5>
+									<div class="tsd-comment tsd-typography">
+										<p>The Voxel Index</p>
+									</div>
+								</li>
+							</ul>
+							<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4>
+						</li>
+					</ul>
+				</section>
+				<section class="tsd-panel tsd-member tsd-kind-method tsd-parent-kind-class">
+					<a name="getBitVoxel" class="tsd-anchor"></a>
+					<h3>get<wbr>Bit<wbr>Voxel</h3>
+					<ul class="tsd-signatures tsd-kind-method tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon">get<wbr>Bit<wbr>Voxel<span class="tsd-signature-symbol">(</span>key<span class="tsd-signature-symbol">: </span><a href="VoxelIndex.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelIndex</a><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><span class="tsd-signature-type">number</span></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/chunks/voxel-chunk.ts#L128">engine/chunks/voxel-chunk.ts:128</a></li>
+								</ul>
+							</aside>
+							<div class="tsd-comment tsd-typography">
+								<div class="lead">
+									<p>Returns the current state of the requested BitVoxel.
+									This is the same property as VoxelChunk.layer.get</p>
+								</div>
+							</div>
+							<h4 class="tsd-parameters-title">Parameters</h4>
+							<ul class="tsd-parameters">
+								<li>
+									<h5>key: <a href="VoxelIndex.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelIndex</a></h5>
+									<div class="tsd-comment tsd-typography">
+										<p>The Voxel Index</p>
+									</div>
+								</li>
+							</ul>
+							<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">number</span></h4>
+							<ul>
+								<li>1 if ON or 0 if OFF</li>
+							</ul>
+						</li>
+					</ul>
+				</section>
+				<section class="tsd-panel tsd-member tsd-kind-method tsd-parent-kind-class">
+					<a name="getBitVoxelCount" class="tsd-anchor"></a>
+					<h3>get<wbr>Bit<wbr>Voxel<wbr>Count</h3>
+					<ul class="tsd-signatures tsd-kind-method tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon">get<wbr>Bit<wbr>Voxel<wbr>Count<span class="tsd-signature-symbol">(</span>key<span class="tsd-signature-symbol">: </span><a href="VoxelIndex.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelIndex</a><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><span class="tsd-signature-type">number</span></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/chunks/voxel-chunk.ts#L138">engine/chunks/voxel-chunk.ts:138</a></li>
+								</ul>
+							</aside>
+							<div class="tsd-comment tsd-typography">
+								<div class="lead">
+									<p>Counts the number of SET BitVoxels for a particular Voxel.
+									This is the same property as VoxelChunk.layer.count</p>
+								</div>
+							</div>
+							<h4 class="tsd-parameters-title">Parameters</h4>
+							<ul class="tsd-parameters">
+								<li>
+									<h5>key: <a href="VoxelIndex.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelIndex</a></h5>
+									<div class="tsd-comment tsd-typography">
+										<p>The Voxel key to use in local coordinates</p>
+									</div>
+								</li>
+							</ul>
+							<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">number</span></h4>
+							<p>number of SET BitVoxels between [0-64] inclusive</p>
+						</li>
+					</ul>
+				</section>
+				<section class="tsd-panel tsd-member tsd-kind-method tsd-parent-kind-class">
+					<a name="getMetaData" class="tsd-anchor"></a>
+					<h3>get<wbr>Meta<wbr>Data</h3>
+					<ul class="tsd-signatures tsd-kind-method tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon">get<wbr>Meta<wbr>Data<span class="tsd-signature-symbol">(</span>key<span class="tsd-signature-symbol">: </span><a href="VoxelIndex.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelIndex</a><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><span class="tsd-signature-type">number</span></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/chunks/voxel-chunk.ts#L73">engine/chunks/voxel-chunk.ts:73</a></li>
+								</ul>
+							</aside>
+							<div class="tsd-comment tsd-typography">
+								<div class="lead">
+									<p>Returns the encoded meta-data for the provided Voxel Index</p>
+								</div>
+							</div>
+							<h4 class="tsd-parameters-title">Parameters</h4>
+							<ul class="tsd-parameters">
+								<li>
+									<h5>key: <a href="VoxelIndex.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelIndex</a></h5>
+									<div class="tsd-comment tsd-typography">
+										<p>The Voxel Index</p>
+									</div>
+								</li>
+							</ul>
+							<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">number</span></h4>
+							<ul>
+								<li>The encoded meta-data</li>
+							</ul>
+						</li>
+					</ul>
+				</section>
+				<section class="tsd-panel tsd-member tsd-kind-method tsd-parent-kind-class">
+					<a name="setBitVoxel" class="tsd-anchor"></a>
+					<h3>set<wbr>Bit<wbr>Voxel</h3>
+					<ul class="tsd-signatures tsd-kind-method tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon">set<wbr>Bit<wbr>Voxel<span class="tsd-signature-symbol">(</span>key<span class="tsd-signature-symbol">: </span><a href="VoxelIndex.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelIndex</a><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><span class="tsd-signature-type">void</span></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/chunks/voxel-chunk.ts#L80">engine/chunks/voxel-chunk.ts:80</a></li>
+								</ul>
+							</aside>
+							<div class="tsd-comment tsd-typography">
+								<div class="lead">
+									<p>Sets the BitVoxel to the 1/ON state at provided position.
+									This is the same property as VoxelChunk.layer.set</p>
+								</div>
+							</div>
+							<h4 class="tsd-parameters-title">Parameters</h4>
+							<ul class="tsd-parameters">
+								<li>
+									<h5>key: <a href="VoxelIndex.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelIndex</a></h5>
+									<div class="tsd-comment tsd-typography">
+										<p>The Voxel Index</p>
+									</div>
+								</li>
+							</ul>
+							<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4>
+						</li>
+					</ul>
+				</section>
+				<section class="tsd-panel tsd-member tsd-kind-method tsd-parent-kind-class">
+					<a name="setMetaData" class="tsd-anchor"></a>
+					<h3>set<wbr>Meta<wbr>Data</h3>
+					<ul class="tsd-signatures tsd-kind-method tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon">set<wbr>Meta<wbr>Data<span class="tsd-signature-symbol">(</span>key<span class="tsd-signature-symbol">: </span><a href="VoxelIndex.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelIndex</a>, meta<span class="tsd-signature-symbol">: </span><span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><span class="tsd-signature-type">void</span></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/chunks/voxel-chunk.ts#L66">engine/chunks/voxel-chunk.ts:66</a></li>
+								</ul>
+							</aside>
+							<div class="tsd-comment tsd-typography">
+								<div class="lead">
+									<p>Sets the meta-data for the provided Voxel Index</p>
+								</div>
+							</div>
+							<h4 class="tsd-parameters-title">Parameters</h4>
+							<ul class="tsd-parameters">
+								<li>
+									<h5>key: <a href="VoxelIndex.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelIndex</a></h5>
+									<div class="tsd-comment tsd-typography">
+										<p>The Voxel Index to set the meta-data</p>
+									</div>
+								</li>
+								<li>
+									<h5>meta: <span class="tsd-signature-type">number</span></h5>
+									<div class="tsd-comment tsd-typography">
+										<p>The meta-data to set</p>
+									</div>
+								</li>
+							</ul>
+							<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4>
+						</li>
+					</ul>
+				</section>
+				<section class="tsd-panel tsd-member tsd-kind-method tsd-parent-kind-class">
+					<a name="toggleBitVoxel" class="tsd-anchor"></a>
+					<h3>toggle<wbr>Bit<wbr>Voxel</h3>
+					<ul class="tsd-signatures tsd-kind-method tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon">toggle<wbr>Bit<wbr>Voxel<span class="tsd-signature-symbol">(</span>key<span class="tsd-signature-symbol">: </span><a href="VoxelIndex.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelIndex</a><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><span class="tsd-signature-type">void</span></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/chunks/voxel-chunk.ts#L118">engine/chunks/voxel-chunk.ts:118</a></li>
+								</ul>
+							</aside>
+							<div class="tsd-comment tsd-typography">
+								<div class="lead">
+									<p>Toggle the BitVoxel to the ON/OFF States based on previous state.
+									This is the same property as VoxelChunk.layer.toggle</p>
+								</div>
+							</div>
+							<h4 class="tsd-parameters-title">Parameters</h4>
+							<ul class="tsd-parameters">
+								<li>
+									<h5>key: <a href="VoxelIndex.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelIndex</a></h5>
+									<div class="tsd-comment tsd-typography">
+										<p>The Voxel Index</p>
+									</div>
+								</li>
+							</ul>
+							<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4>
+						</li>
+					</ul>
+				</section>
+				<section class="tsd-panel tsd-member tsd-kind-method tsd-parent-kind-class">
+					<a name="unsetBitVoxel" class="tsd-anchor"></a>
+					<h3>unset<wbr>Bit<wbr>Voxel</h3>
+					<ul class="tsd-signatures tsd-kind-method tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon">unset<wbr>Bit<wbr>Voxel<span class="tsd-signature-symbol">(</span>key<span class="tsd-signature-symbol">: </span><a href="VoxelIndex.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelIndex</a><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><span class="tsd-signature-type">void</span></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/chunks/voxel-chunk.ts#L109">engine/chunks/voxel-chunk.ts:109</a></li>
+								</ul>
+							</aside>
+							<div class="tsd-comment tsd-typography">
+								<div class="lead">
+									<p>Unsets the BitVoxel to the 0/OFF state at provided position.
+									This is the same property as VoxelChunk.layer.unset</p>
+								</div>
+							</div>
+							<h4 class="tsd-parameters-title">Parameters</h4>
+							<ul class="tsd-parameters">
+								<li>
+									<h5>key: <a href="VoxelIndex.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelIndex</a></h5>
+									<div class="tsd-comment tsd-typography">
+										<p>The Voxel Index</p>
+									</div>
+								</li>
+							</ul>
+							<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4>
+						</li>
+					</ul>
+				</section>
+			</section>
+		</div>
+		<div class="col-4 col-menu menu-sticky-wrap menu-highlight">
+			<nav class="tsd-navigation primary">
+				<ul>
+					<li class=" ">
+						<a href="../modules.html">Exports</a>
+					</li>
+				</ul>
+			</nav>
+			<nav class="tsd-navigation secondary menu-sticky">
+				<ul class="before-current">
+					<li class=" tsd-kind-class">
+						<a href="BVXLayer.html" class="tsd-kind-icon">BVXLayer</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="BitArray.html" class="tsd-kind-icon">Bit<wbr>Array</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="BitOps.html" class="tsd-kind-icon">Bit<wbr>Ops</a>
+					</li>
+					<li class=" tsd-kind-class tsd-has-type-parameter">
+						<a href="HashGrid.html" class="tsd-kind-icon">Hash<wbr>Grid</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="LinearKey.html" class="tsd-kind-icon">Linear<wbr>Key</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="MortonKey.html" class="tsd-kind-icon">Morton<wbr>Key</a>
+					</li>
+				</ul>
+				<ul class="current">
+					<li class="current tsd-kind-class">
+						<a href="VoxelChunk.html" class="tsd-kind-icon">Voxel<wbr>Chunk</a>
+						<ul>
+							<li class=" tsd-kind-constructor tsd-parent-kind-class">
+								<a href="VoxelChunk.html#constructor" class="tsd-kind-icon">constructor</a>
+							</li>
+							<li class=" tsd-kind-property tsd-parent-kind-class tsd-is-static">
+								<a href="VoxelChunk.html#DIMS" class="tsd-kind-icon">DIMS</a>
+							</li>
+							<li class=" tsd-kind-property tsd-parent-kind-class tsd-is-static">
+								<a href="VoxelChunk.html#SIZE" class="tsd-kind-icon">SIZE</a>
+							</li>
+							<li class=" tsd-kind-get-signature tsd-parent-kind-class">
+								<a href="VoxelChunk.html#key" class="tsd-kind-icon">key</a>
+							</li>
+							<li class=" tsd-kind-get-signature tsd-parent-kind-class">
+								<a href="VoxelChunk.html#layer" class="tsd-kind-icon">layer</a>
+							</li>
+							<li class=" tsd-kind-get-signature tsd-parent-kind-class">
+								<a href="VoxelChunk.html#length" class="tsd-kind-icon">length</a>
+							</li>
+							<li class=" tsd-kind-method tsd-parent-kind-class">
+								<a href="VoxelChunk.html#cmp" class="tsd-kind-icon">cmp</a>
+							</li>
+							<li class=" tsd-kind-method tsd-parent-kind-class">
+								<a href="VoxelChunk.html#emptyVoxel" class="tsd-kind-icon">empty<wbr>Voxel</a>
+							</li>
+							<li class=" tsd-kind-method tsd-parent-kind-class">
+								<a href="VoxelChunk.html#fillVoxel" class="tsd-kind-icon">fill<wbr>Voxel</a>
+							</li>
+							<li class=" tsd-kind-method tsd-parent-kind-class">
+								<a href="VoxelChunk.html#getBitVoxel" class="tsd-kind-icon">get<wbr>Bit<wbr>Voxel</a>
+							</li>
+							<li class=" tsd-kind-method tsd-parent-kind-class">
+								<a href="VoxelChunk.html#getBitVoxelCount" class="tsd-kind-icon">get<wbr>Bit<wbr>Voxel<wbr>Count</a>
+							</li>
+							<li class=" tsd-kind-method tsd-parent-kind-class">
+								<a href="VoxelChunk.html#getMetaData" class="tsd-kind-icon">get<wbr>Meta<wbr>Data</a>
+							</li>
+							<li class=" tsd-kind-method tsd-parent-kind-class">
+								<a href="VoxelChunk.html#setBitVoxel" class="tsd-kind-icon">set<wbr>Bit<wbr>Voxel</a>
+							</li>
+							<li class=" tsd-kind-method tsd-parent-kind-class">
+								<a href="VoxelChunk.html#setMetaData" class="tsd-kind-icon">set<wbr>Meta<wbr>Data</a>
+							</li>
+							<li class=" tsd-kind-method tsd-parent-kind-class">
+								<a href="VoxelChunk.html#toggleBitVoxel" class="tsd-kind-icon">toggle<wbr>Bit<wbr>Voxel</a>
+							</li>
+							<li class=" tsd-kind-method tsd-parent-kind-class">
+								<a href="VoxelChunk.html#unsetBitVoxel" class="tsd-kind-icon">unset<wbr>Bit<wbr>Voxel</a>
+							</li>
+						</ul>
+					</li>
+				</ul>
+				<ul class="after-current">
+					<li class=" tsd-kind-class">
+						<a href="VoxelChunk16.html" class="tsd-kind-icon">Voxel<wbr>Chunk16</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="VoxelChunk32.html" class="tsd-kind-icon">Voxel<wbr>Chunk32</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="VoxelChunk8.html" class="tsd-kind-icon">Voxel<wbr>Chunk8</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="VoxelFaceGeometry.html" class="tsd-kind-icon">Voxel<wbr>Face<wbr>Geometry</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="VoxelGeometry.html" class="tsd-kind-icon">Voxel<wbr>Geometry</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="VoxelIndex.html" class="tsd-kind-icon">Voxel<wbr>Index</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="VoxelRay.html" class="tsd-kind-icon">Voxel<wbr>Ray</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="VoxelRaycaster.html" class="tsd-kind-icon">Voxel<wbr>Raycaster</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="VoxelWorld.html" class="tsd-kind-icon">Voxel<wbr>World</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="WorldIndex.html" class="tsd-kind-icon">World<wbr>Index</a>
+					</li>
+					<li class=" tsd-kind-interface">
+						<a href="../interfaces/Key.html" class="tsd-kind-icon">Key</a>
+					</li>
+				</ul>
+			</nav>
+		</div>
+	</div>
+</div>
+<footer class="with-border-bottom">
+	<div class="container">
+		<h2>Legend</h2>
+		<div class="tsd-legend-group">
+			<ul class="tsd-legend">
+				<li class="tsd-kind-constructor tsd-parent-kind-class"><span class="tsd-kind-icon">Constructor</span></li>
+				<li class="tsd-kind-method tsd-parent-kind-class"><span class="tsd-kind-icon">Method</span></li>
+				<li class="tsd-kind-accessor tsd-parent-kind-class"><span class="tsd-kind-icon">Accessor</span></li>
+			</ul>
+			<ul class="tsd-legend">
+				<li class="tsd-kind-constructor tsd-parent-kind-class tsd-is-inherited"><span class="tsd-kind-icon">Inherited constructor</span></li>
+				<li class="tsd-kind-method tsd-parent-kind-class tsd-is-inherited"><span class="tsd-kind-icon">Inherited method</span></li>
+			</ul>
+			<ul class="tsd-legend">
+				<li class="tsd-kind-property tsd-parent-kind-class tsd-is-static"><span class="tsd-kind-icon">Static property</span></li>
+				<li class="tsd-kind-method tsd-parent-kind-class tsd-is-static"><span class="tsd-kind-icon">Static method</span></li>
+			</ul>
+			<ul class="tsd-legend">
+				<li class="tsd-kind-method tsd-parent-kind-interface"><span class="tsd-kind-icon">Method</span></li>
+			</ul>
+		</div>
+	</div>
+</footer>
+<div class="container tsd-generator">
+	<p>Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p>
+</div>
+<div class="overlay"></div>
+<script src="../assets/js/main.js"></script>
+</body>
+</html>

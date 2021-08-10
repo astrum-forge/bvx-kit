@@ -1,0 +1,217 @@
+<!doctype html>
+<html class="default no-js">
+<head>
+	<meta charset="utf-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<title>@ovistek/bvx.ts</title>
+	<meta name="description" content="Documentation for @ovistek/bvx.ts">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<link rel="stylesheet" href="assets/css/main.css">
+	<script async src="assets/js/search.js" id="search-script"></script>
+</head>
+<body>
+<header>
+	<div class="tsd-page-toolbar">
+		<div class="container">
+			<div class="table-wrap">
+				<div class="table-cell" id="tsd-search" data-index="assets/js/search.json" data-base=".">
+					<div class="field">
+						<label for="tsd-search-field" class="tsd-widget search no-caption">Search</label>
+						<input id="tsd-search-field" type="text" />
+					</div>
+					<ul class="results">
+						<li class="state loading">Preparing search index...</li>
+						<li class="state failure">The search index is not available</li>
+					</ul>
+					<a href="index.html" class="title">@ovistek/bvx.ts</a>
+				</div>
+				<div class="table-cell" id="tsd-widgets">
+					<div id="tsd-filter">
+						<a href="#" class="tsd-widget options no-caption" data-toggle="options">Options</a>
+						<div class="tsd-filter-group">
+							<div class="tsd-select" id="tsd-filter-visibility">
+								<span class="tsd-select-label">All</span>
+								<ul class="tsd-select-list">
+									<li data-value="public">Public</li>
+									<li data-value="protected">Public/Protected</li>
+									<li data-value="private" class="selected">All</li>
+								</ul>
+							</div>
+							<input type="checkbox" id="tsd-filter-inherited" checked />
+							<label class="tsd-widget" for="tsd-filter-inherited">Inherited</label>
+							<input type="checkbox" id="tsd-filter-externals" checked />
+							<label class="tsd-widget" for="tsd-filter-externals">Externals</label>
+						</div>
+					</div>
+					<a href="#" class="tsd-widget menu no-caption" data-toggle="menu">Menu</a>
+				</div>
+			</div>
+		</div>
+	</div>
+	<div class="tsd-page-title">
+		<div class="container">
+			<h1>@ovistek/bvx.ts</h1>
+		</div>
+	</div>
+</header>
+<div class="container container-main">
+	<div class="row">
+		<div class="col-8 col-content">
+			<div class="tsd-panel tsd-typography">
+				<h3 align="center">
+					<img src="graphics/icon.png?raw=true" alt="OvisTek Logo" width="150">
+				</h3>
+				<p><a href="https://twitter.com/OvisTek"><img src="https://img.shields.io/badge/contact-OvisTek-blue.svg?style=flat" alt="Twitter: @OvisTek"></a>
+					<a href="https://www.codacy.com/gh/OvisTek/bvx.ts/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=OvisTek/bvx.ts&amp;utm_campaign=Badge_Grade"><img src="https://app.codacy.com/project/badge/Grade/4b7dbe49f42d465bb3b6f3c669801764" alt="Codacy Badge"></a>
+					<a href="badges"><img src="badges/coverage-global%20coverage.svg" alt="Coverage Badge"></a>
+					<a href="https://packagephobia.com/result?p=@ovistek/bvx.ts"><img src="https://packagephobia.com/badge?p=@ovistek/bvx.ts" alt="install size"></a>
+					<a href="https://www.npmjs.com/package/@ovistek/bvx.ts"><img src="https://img.shields.io/npm/v/@ovistek/bvx.ts" alt="NPM"></a>
+				<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-orange.svg?style=flat" alt="License"></a></p>
+				<a href="#generic-amp-renderer-agnostic-bitvoxel-engine-implementation-in-typescript" id="generic-amp-renderer-agnostic-bitvoxel-engine-implementation-in-typescript" style="color: inherit; text-decoration: none;">
+					<h4><strong>Generic &amp; Renderer Agnostic BitVoxel Engine Implementation in TypeScript</strong></h4>
+				</a>
+				<hr>
+				<p><em><strong>BitVoxel Engine</strong></em> detaches Voxel meta-data and Rendering state data into abstracted layers. This allows rendering smaller voxels with inherited meta-data without subdividing the Voxel layer.</p>
+				<h3 align="center">
+					<img src="graphics/info.jpg?raw=true" alt="BitVoxel Layer Composition" width="800">
+				</h3>
+				<a href="#about" id="about" style="color: inherit; text-decoration: none;">
+					<h3><em><strong>About</strong></em></h3>
+				</a>
+				<ul>
+					<li>  Voxel Meta-Data Layer available in <strong>0</strong>, <strong>8</strong>, <strong>16</strong> or <strong>32</strong> bit configurations</li>
+					<li>  BitVoxel State Layer requires <strong>1</strong> bit per BitVoxel</li>
+					<li>  Written in TypeScript with no external dependencies</li>
+					<li>  Designed for Robustness &amp; Performance with 100% unit tested code</li>
+					<li>  Permissive <a href="LICENSE">MIT License</a></li>
+				</ul>
+				<a href="#installation" id="installation" style="color: inherit; text-decoration: none;">
+					<h3><em><strong>Installation</strong></em></h3>
+				</a>
+				<ul>
+					<li>  Install using <a href="https://www.npmjs.com/package/@ovistek/bvx.ts">npm</a></li>
+				</ul>
+				<pre><code class="language-console">npm install @ovistek/bvx.ts
+</code></pre>
+				<a href="#quick-setup" id="quick-setup" style="color: inherit; text-decoration: none;">
+					<h3><em><strong>Quick Setup</strong></em></h3>
+				</a>
+				<pre><code class="language-TypeScript"><span style="color: #AF00DB">import</span><span style="color: #000000"> { </span><span style="color: #001080">MortonKey</span><span style="color: #000000">, </span><span style="color: #001080">VoxelChunk</span><span style="color: #000000">, </span><span style="color: #001080">VoxelWorld</span><span style="color: #000000"> } </span><span style="color: #AF00DB">from</span><span style="color: #000000"> </span><span style="color: #A31515">&#039;@ovistek/bvx.ts&#039;</span><span style="color: #000000">;</span>
+
+<span style="color: #008000">// create a new world instance to manage our Voxels</span>
+<span style="color: #0000FF">const</span><span style="color: #000000"> </span><span style="color: #0070C1">world</span><span style="color: #000000">:</span><span style="color: #267F99">VoxelWorld</span><span style="color: #000000"> = </span><span style="color: #0000FF">new</span><span style="color: #000000"> </span><span style="color: #795E26">VoxelWorld</span><span style="color: #000000">();</span>
+
+<span style="color: #008000">// create a new VoxelChunk at world position (x=1,y=1,z=1)</span>
+<span style="color: #0000FF">const</span><span style="color: #000000"> </span><span style="color: #0070C1">chunk</span><span style="color: #000000">:</span><span style="color: #267F99">VoxelChunk</span><span style="color: #000000"> = </span><span style="color: #0000FF">new</span><span style="color: #000000"> </span><span style="color: #795E26">VoxelChunk</span><span style="color: #000000">(</span><span style="color: #001080">MortonKey</span><span style="color: #000000">.</span><span style="color: #795E26">from</span><span style="color: #000000">(</span><span style="color: #098658">1</span><span style="color: #000000">,</span><span style="color: #098658">1</span><span style="color: #000000">,</span><span style="color: #098658">1</span><span style="color: #000000">));</span>
+
+<span style="color: #008000">// insert the chunk into the world</span>
+<span style="color: #001080">world</span><span style="color: #000000">.</span><span style="color: #795E26">insert</span><span style="color: #000000">(</span><span style="color: #001080">chunk</span><span style="color: #000000">);</span>
+
+<span style="color: #008000">// return a previously inserted VoxelChunk instance from position (x=1,y=1,z=1)</span>
+<span style="color: #0000FF">const</span><span style="color: #000000"> </span><span style="color: #0070C1">prevChunk</span><span style="color: #000000">:</span><span style="color: #267F99">VoxelChunk</span><span style="color: #000000"> | </span><span style="color: #267F99">null</span><span style="color: #000000"> = </span><span style="color: #001080">world</span><span style="color: #000000">.</span><span style="color: #795E26">get</span><span style="color: #000000">(</span><span style="color: #001080">MortonKey</span><span style="color: #000000">.</span><span style="color: #795E26">from</span><span style="color: #000000">(</span><span style="color: #098658">1</span><span style="color: #000000">,</span><span style="color: #098658">1</span><span style="color: #000000">,</span><span style="color: #098658">1</span><span style="color: #000000">));</span>
+
+<span style="color: #AF00DB">if</span><span style="color: #000000"> (</span><span style="color: #001080">prevChunk</span><span style="color: #000000"> !== </span><span style="color: #0000FF">null</span><span style="color: #000000">) {</span>
+<span style="color: #000000">  </span><span style="color: #008000">// do something with VoxelChunk</span>
+<span style="color: #000000">}</span>
+</code></pre>
+			</div>
+		</div>
+		<div class="col-4 col-menu menu-sticky-wrap menu-highlight">
+			<nav class="tsd-navigation primary">
+				<ul>
+					<li class=" ">
+						<a href="modules.html">Exports</a>
+					</li>
+				</ul>
+			</nav>
+			<nav class="tsd-navigation secondary menu-sticky">
+				<ul class="before-current">
+					<li class=" tsd-kind-class">
+						<a href="classes/BVXLayer.html" class="tsd-kind-icon">BVXLayer</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="classes/BitArray.html" class="tsd-kind-icon">Bit<wbr>Array</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="classes/BitOps.html" class="tsd-kind-icon">Bit<wbr>Ops</a>
+					</li>
+					<li class=" tsd-kind-class tsd-has-type-parameter">
+						<a href="classes/HashGrid.html" class="tsd-kind-icon">Hash<wbr>Grid</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="classes/LinearKey.html" class="tsd-kind-icon">Linear<wbr>Key</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="classes/MortonKey.html" class="tsd-kind-icon">Morton<wbr>Key</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="classes/VoxelChunk.html" class="tsd-kind-icon">Voxel<wbr>Chunk</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="classes/VoxelChunk16.html" class="tsd-kind-icon">Voxel<wbr>Chunk16</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="classes/VoxelChunk32.html" class="tsd-kind-icon">Voxel<wbr>Chunk32</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="classes/VoxelChunk8.html" class="tsd-kind-icon">Voxel<wbr>Chunk8</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="classes/VoxelFaceGeometry.html" class="tsd-kind-icon">Voxel<wbr>Face<wbr>Geometry</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="classes/VoxelGeometry.html" class="tsd-kind-icon">Voxel<wbr>Geometry</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="classes/VoxelIndex.html" class="tsd-kind-icon">Voxel<wbr>Index</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="classes/VoxelRay.html" class="tsd-kind-icon">Voxel<wbr>Ray</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="classes/VoxelRaycaster.html" class="tsd-kind-icon">Voxel<wbr>Raycaster</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="classes/VoxelWorld.html" class="tsd-kind-icon">Voxel<wbr>World</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="classes/WorldIndex.html" class="tsd-kind-icon">World<wbr>Index</a>
+					</li>
+					<li class=" tsd-kind-interface">
+						<a href="interfaces/Key.html" class="tsd-kind-icon">Key</a>
+					</li>
+				</ul>
+			</nav>
+		</div>
+	</div>
+</div>
+<footer class="with-border-bottom">
+	<div class="container">
+		<h2>Legend</h2>
+		<div class="tsd-legend-group">
+			<ul class="tsd-legend">
+				<li class="tsd-kind-constructor tsd-parent-kind-class"><span class="tsd-kind-icon">Constructor</span></li>
+				<li class="tsd-kind-method tsd-parent-kind-class"><span class="tsd-kind-icon">Method</span></li>
+				<li class="tsd-kind-accessor tsd-parent-kind-class"><span class="tsd-kind-icon">Accessor</span></li>
+			</ul>
+			<ul class="tsd-legend">
+				<li class="tsd-kind-constructor tsd-parent-kind-class tsd-is-inherited"><span class="tsd-kind-icon">Inherited constructor</span></li>
+				<li class="tsd-kind-method tsd-parent-kind-class tsd-is-inherited"><span class="tsd-kind-icon">Inherited method</span></li>
+			</ul>
+			<ul class="tsd-legend">
+				<li class="tsd-kind-property tsd-parent-kind-class tsd-is-static"><span class="tsd-kind-icon">Static property</span></li>
+				<li class="tsd-kind-method tsd-parent-kind-class tsd-is-static"><span class="tsd-kind-icon">Static method</span></li>
+			</ul>
+			<ul class="tsd-legend">
+				<li class="tsd-kind-method tsd-parent-kind-interface"><span class="tsd-kind-icon">Method</span></li>
+			</ul>
+		</div>
+	</div>
+</footer>
+<div class="container tsd-generator">
+	<p>Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p>
+</div>
+<div class="overlay"></div>
+<script src="assets/js/main.js"></script>
+</body>
+</html>

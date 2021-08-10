@@ -1,0 +1,432 @@
+<!doctype html>
+<html class="default no-js">
+<head>
+	<meta charset="utf-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<title>VoxelWorld | @ovistek/bvx.ts</title>
+	<meta name="description" content="Documentation for @ovistek/bvx.ts">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<link rel="stylesheet" href="../assets/css/main.css">
+	<script async src="../assets/js/search.js" id="search-script"></script>
+</head>
+<body>
+<header>
+	<div class="tsd-page-toolbar">
+		<div class="container">
+			<div class="table-wrap">
+				<div class="table-cell" id="tsd-search" data-index="../assets/js/search.json" data-base="..">
+					<div class="field">
+						<label for="tsd-search-field" class="tsd-widget search no-caption">Search</label>
+						<input id="tsd-search-field" type="text" />
+					</div>
+					<ul class="results">
+						<li class="state loading">Preparing search index...</li>
+						<li class="state failure">The search index is not available</li>
+					</ul>
+					<a href="../index.html" class="title">@ovistek/bvx.ts</a>
+				</div>
+				<div class="table-cell" id="tsd-widgets">
+					<div id="tsd-filter">
+						<a href="#" class="tsd-widget options no-caption" data-toggle="options">Options</a>
+						<div class="tsd-filter-group">
+							<div class="tsd-select" id="tsd-filter-visibility">
+								<span class="tsd-select-label">All</span>
+								<ul class="tsd-select-list">
+									<li data-value="public">Public</li>
+									<li data-value="protected">Public/Protected</li>
+									<li data-value="private" class="selected">All</li>
+								</ul>
+							</div>
+							<input type="checkbox" id="tsd-filter-inherited" checked />
+							<label class="tsd-widget" for="tsd-filter-inherited">Inherited</label>
+							<input type="checkbox" id="tsd-filter-externals" checked />
+							<label class="tsd-widget" for="tsd-filter-externals">Externals</label>
+						</div>
+					</div>
+					<a href="#" class="tsd-widget menu no-caption" data-toggle="menu">Menu</a>
+				</div>
+			</div>
+		</div>
+	</div>
+	<div class="tsd-page-title">
+		<div class="container">
+			<ul class="tsd-breadcrumb">
+				<li>
+					<a href="../modules.html">@ovistek/bvx.ts</a>
+				</li>
+				<li>
+					<a href="VoxelWorld.html">VoxelWorld</a>
+				</li>
+			</ul>
+			<h1>Class VoxelWorld</h1>
+		</div>
+	</div>
+</header>
+<div class="container container-main">
+	<div class="row">
+		<div class="col-8 col-content">
+			<section class="tsd-panel tsd-comment">
+				<div class="tsd-comment tsd-typography">
+					<div class="lead">
+						<p>VoxelWorld manages a single world instance of a collection of Voxels.
+							Storage is managed by MortonKeys that represents the world coordinate
+						for each individual VoxelChunk.</p>
+					</div>
+					<p>Each MortonKey can contain 0-1023 values on each of the x,y,z axis
+						Each VoxelChunk contains 4 x 4 x 4 Voxels
+					Each Voxel contains 4 x 4 x 4 BitVoxels</p>
+					<p>If we take the assumption that each Voxel is 1m x 1m x 1m in size, then
+					VoxelWorld can contain a maximum map of 4096m x 4096m x 4096m or 4km^3</p>
+					<p>For game engines or Renderers that want to have bigger maps, they can always
+						spawn additional independent VoxelWorld instances and manage the coordinates
+					accordingly.</p>
+				</div>
+			</section>
+			<section class="tsd-panel tsd-hierarchy">
+				<h3>Hierarchy</h3>
+				<ul class="tsd-hierarchy">
+					<li>
+						<span class="target">VoxelWorld</span>
+					</li>
+				</ul>
+			</section>
+			<section class="tsd-panel-group tsd-index-group">
+				<h2>Index</h2>
+				<section class="tsd-panel tsd-index-panel">
+					<div class="tsd-index-content">
+						<section class="tsd-index-section ">
+							<h3>Constructors</h3>
+							<ul class="tsd-index-list">
+								<li class="tsd-kind-constructor tsd-parent-kind-class"><a href="VoxelWorld.html#constructor" class="tsd-kind-icon">constructor</a></li>
+							</ul>
+						</section>
+						<section class="tsd-index-section ">
+							<h3>Accessors</h3>
+							<ul class="tsd-index-list">
+								<li class="tsd-kind-get-signature tsd-parent-kind-class"><a href="VoxelWorld.html#raycaster" class="tsd-kind-icon">raycaster</a></li>
+							</ul>
+						</section>
+						<section class="tsd-index-section ">
+							<h3>Methods</h3>
+							<ul class="tsd-index-list">
+								<li class="tsd-kind-method tsd-parent-kind-class"><a href="VoxelWorld.html#get" class="tsd-kind-icon">get</a></li>
+								<li class="tsd-kind-method tsd-parent-kind-class"><a href="VoxelWorld.html#getOpt" class="tsd-kind-icon">get<wbr>Opt</a></li>
+								<li class="tsd-kind-method tsd-parent-kind-class"><a href="VoxelWorld.html#insert" class="tsd-kind-icon">insert</a></li>
+								<li class="tsd-kind-method tsd-parent-kind-class"><a href="VoxelWorld.html#remove" class="tsd-kind-icon">remove</a></li>
+							</ul>
+						</section>
+					</div>
+				</section>
+			</section>
+			<section class="tsd-panel-group tsd-member-group ">
+				<h2>Constructors</h2>
+				<section class="tsd-panel tsd-member tsd-kind-constructor tsd-parent-kind-class">
+					<a name="constructor" class="tsd-anchor"></a>
+					<h3>constructor</h3>
+					<ul class="tsd-signatures tsd-kind-constructor tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon">new <wbr>Voxel<wbr>World<span class="tsd-signature-symbol">(</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><a href="VoxelWorld.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelWorld</a></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/voxel-world.ts#L30">engine/voxel-world.ts:30</a></li>
+								</ul>
+							</aside>
+							<h4 class="tsd-returns-title">Returns <a href="VoxelWorld.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelWorld</a></h4>
+						</li>
+					</ul>
+				</section>
+			</section>
+			<section class="tsd-panel-group tsd-member-group ">
+				<h2>Accessors</h2>
+				<section class="tsd-panel tsd-member tsd-kind-get-signature tsd-parent-kind-class">
+					<a name="raycaster" class="tsd-anchor"></a>
+					<h3>raycaster</h3>
+					<ul class="tsd-signatures tsd-kind-get-signature tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon"><span class="tsd-signature-symbol">get</span> raycaster<span class="tsd-signature-symbol">(</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><a href="VoxelRaycaster.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelRaycaster</a></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/voxel-world.ts#L42">engine/voxel-world.ts:42</a></li>
+								</ul>
+							</aside>
+							<div class="tsd-comment tsd-typography">
+								<div class="lead">
+									<p>Returns the Raycaster structure that allows picking Voxels using a VoxelRay</p>
+								</div>
+							</div>
+							<h4 class="tsd-returns-title">Returns <a href="VoxelRaycaster.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelRaycaster</a></h4>
+						</li>
+					</ul>
+				</section>
+			</section>
+			<section class="tsd-panel-group tsd-member-group ">
+				<h2>Methods</h2>
+				<section class="tsd-panel tsd-member tsd-kind-method tsd-parent-kind-class">
+					<a name="get" class="tsd-anchor"></a>
+					<h3>get</h3>
+					<ul class="tsd-signatures tsd-kind-method tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon">get<span class="tsd-signature-symbol">(</span>key<span class="tsd-signature-symbol">: </span><a href="MortonKey.html" class="tsd-signature-type" data-tsd-kind="Class">MortonKey</a><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><span class="tsd-signature-type">null</span><span class="tsd-signature-symbol"> | </span><a href="VoxelChunk.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelChunk</a></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/voxel-world.ts#L51">engine/voxel-world.ts:51</a></li>
+								</ul>
+							</aside>
+							<div class="tsd-comment tsd-typography">
+								<div class="lead">
+									<p>Returns a VoxelChunk from the provided Morton Key</p>
+								</div>
+							</div>
+							<h4 class="tsd-parameters-title">Parameters</h4>
+							<ul class="tsd-parameters">
+								<li>
+									<h5>key: <a href="MortonKey.html" class="tsd-signature-type" data-tsd-kind="Class">MortonKey</a></h5>
+									<div class="tsd-comment tsd-typography">
+										<p>The key used to store the required VoxelChunk</p>
+									</div>
+								</li>
+							</ul>
+							<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol"> | </span><a href="VoxelChunk.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelChunk</a></h4>
+							<ul>
+								<li>VoxelChunk instance or null</li>
+							</ul>
+						</li>
+					</ul>
+				</section>
+				<section class="tsd-panel tsd-member tsd-kind-method tsd-parent-kind-class">
+					<a name="getOpt" class="tsd-anchor"></a>
+					<h3>get<wbr>Opt</h3>
+					<ul class="tsd-signatures tsd-kind-method tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon">get<wbr>Opt<span class="tsd-signature-symbol">(</span>key<span class="tsd-signature-symbol">: </span><a href="MortonKey.html" class="tsd-signature-type" data-tsd-kind="Class">MortonKey</a>, optret<span class="tsd-signature-symbol">: </span><a href="VoxelChunk.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelChunk</a><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><a href="VoxelChunk.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelChunk</a></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/voxel-world.ts#L61">engine/voxel-world.ts:61</a></li>
+								</ul>
+							</aside>
+							<div class="tsd-comment tsd-typography">
+								<div class="lead">
+									<p>Returns a VoxelChunk from the provided Morton Key</p>
+								</div>
+							</div>
+							<h4 class="tsd-parameters-title">Parameters</h4>
+							<ul class="tsd-parameters">
+								<li>
+									<h5>key: <a href="MortonKey.html" class="tsd-signature-type" data-tsd-kind="Class">MortonKey</a></h5>
+									<div class="tsd-comment tsd-typography">
+										<p>The key used to store the required VoxelChunk</p>
+									</div>
+								</li>
+								<li>
+									<h5>optret: <a href="VoxelChunk.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelChunk</a></h5>
+									<div class="tsd-comment tsd-typography">
+										<p>(optional) item to return if VoxelChunk is null</p>
+									</div>
+								</li>
+							</ul>
+							<h4 class="tsd-returns-title">Returns <a href="VoxelChunk.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelChunk</a></h4>
+							<ul>
+								<li>VoxelChunk instance or null</li>
+							</ul>
+						</li>
+					</ul>
+				</section>
+				<section class="tsd-panel tsd-member tsd-kind-method tsd-parent-kind-class">
+					<a name="insert" class="tsd-anchor"></a>
+					<h3>insert</h3>
+					<ul class="tsd-signatures tsd-kind-method tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon">insert<span class="tsd-signature-symbol">(</span>chunk<span class="tsd-signature-symbol">: </span><a href="VoxelChunk.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelChunk</a><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><span class="tsd-signature-type">void</span></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/voxel-world.ts#L75">engine/voxel-world.ts:75</a></li>
+								</ul>
+							</aside>
+							<div class="tsd-comment tsd-typography">
+								<div class="lead">
+									<p>Inserts a new VoxelChunk instance at the provided Morton Key Coordinate</p>
+								</div>
+							</div>
+							<h4 class="tsd-parameters-title">Parameters</h4>
+							<ul class="tsd-parameters">
+								<li>
+									<h5>chunk: <a href="VoxelChunk.html" class="tsd-signature-type" data-tsd-kind="Class">VoxelChunk</a></h5>
+									<div class="tsd-comment tsd-typography">
+										<p>The Chunk instance to insert</p>
+									</div>
+								</li>
+							</ul>
+							<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4>
+						</li>
+					</ul>
+				</section>
+				<section class="tsd-panel tsd-member tsd-kind-method tsd-parent-kind-class">
+					<a name="remove" class="tsd-anchor"></a>
+					<h3>remove</h3>
+					<ul class="tsd-signatures tsd-kind-method tsd-parent-kind-class">
+						<li class="tsd-signature tsd-kind-icon">remove<span class="tsd-signature-symbol">(</span>key<span class="tsd-signature-symbol">: </span><a href="MortonKey.html" class="tsd-signature-type" data-tsd-kind="Class">MortonKey</a><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">: </span><span class="tsd-signature-type">boolean</span></li>
+					</ul>
+					<ul class="tsd-descriptions">
+						<li class="tsd-description">
+							<aside class="tsd-sources">
+								<ul>
+									<li>Defined in <a href="https://github.com/OvisTek/bvx.ts/blob/1a1bf01/src/engine/voxel-world.ts#L85">engine/voxel-world.ts:85</a></li>
+								</ul>
+							</aside>
+							<div class="tsd-comment tsd-typography">
+								<div class="lead">
+									<p>Removes a previous instance of VoxelChunk from provided Morton Key Coordinate</p>
+								</div>
+							</div>
+							<h4 class="tsd-parameters-title">Parameters</h4>
+							<ul class="tsd-parameters">
+								<li>
+									<h5>key: <a href="MortonKey.html" class="tsd-signature-type" data-tsd-kind="Class">MortonKey</a></h5>
+									<div class="tsd-comment tsd-typography">
+										<p>The Morton Key Coordinate</p>
+									</div>
+								</li>
+							</ul>
+							<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">boolean</span></h4>
+							<ul>
+								<li>Returns true if removed or false otherwise. If returns false then there
+								was nothing to return</li>
+							</ul>
+						</li>
+					</ul>
+				</section>
+			</section>
+		</div>
+		<div class="col-4 col-menu menu-sticky-wrap menu-highlight">
+			<nav class="tsd-navigation primary">
+				<ul>
+					<li class=" ">
+						<a href="../modules.html">Exports</a>
+					</li>
+				</ul>
+			</nav>
+			<nav class="tsd-navigation secondary menu-sticky">
+				<ul class="before-current">
+					<li class=" tsd-kind-class">
+						<a href="BVXLayer.html" class="tsd-kind-icon">BVXLayer</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="BitArray.html" class="tsd-kind-icon">Bit<wbr>Array</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="BitOps.html" class="tsd-kind-icon">Bit<wbr>Ops</a>
+					</li>
+					<li class=" tsd-kind-class tsd-has-type-parameter">
+						<a href="HashGrid.html" class="tsd-kind-icon">Hash<wbr>Grid</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="LinearKey.html" class="tsd-kind-icon">Linear<wbr>Key</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="MortonKey.html" class="tsd-kind-icon">Morton<wbr>Key</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="VoxelChunk.html" class="tsd-kind-icon">Voxel<wbr>Chunk</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="VoxelChunk16.html" class="tsd-kind-icon">Voxel<wbr>Chunk16</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="VoxelChunk32.html" class="tsd-kind-icon">Voxel<wbr>Chunk32</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="VoxelChunk8.html" class="tsd-kind-icon">Voxel<wbr>Chunk8</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="VoxelFaceGeometry.html" class="tsd-kind-icon">Voxel<wbr>Face<wbr>Geometry</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="VoxelGeometry.html" class="tsd-kind-icon">Voxel<wbr>Geometry</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="VoxelIndex.html" class="tsd-kind-icon">Voxel<wbr>Index</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="VoxelRay.html" class="tsd-kind-icon">Voxel<wbr>Ray</a>
+					</li>
+					<li class=" tsd-kind-class">
+						<a href="VoxelRaycaster.html" class="tsd-kind-icon">Voxel<wbr>Raycaster</a>
+					</li>
+				</ul>
+				<ul class="current">
+					<li class="current tsd-kind-class">
+						<a href="VoxelWorld.html" class="tsd-kind-icon">Voxel<wbr>World</a>
+						<ul>
+							<li class=" tsd-kind-constructor tsd-parent-kind-class">
+								<a href="VoxelWorld.html#constructor" class="tsd-kind-icon">constructor</a>
+							</li>
+							<li class=" tsd-kind-get-signature tsd-parent-kind-class">
+								<a href="VoxelWorld.html#raycaster" class="tsd-kind-icon">raycaster</a>
+							</li>
+							<li class=" tsd-kind-method tsd-parent-kind-class">
+								<a href="VoxelWorld.html#get" class="tsd-kind-icon">get</a>
+							</li>
+							<li class=" tsd-kind-method tsd-parent-kind-class">
+								<a href="VoxelWorld.html#getOpt" class="tsd-kind-icon">get<wbr>Opt</a>
+							</li>
+							<li class=" tsd-kind-method tsd-parent-kind-class">
+								<a href="VoxelWorld.html#insert" class="tsd-kind-icon">insert</a>
+							</li>
+							<li class=" tsd-kind-method tsd-parent-kind-class">
+								<a href="VoxelWorld.html#remove" class="tsd-kind-icon">remove</a>
+							</li>
+						</ul>
+					</li>
+				</ul>
+				<ul class="after-current">
+					<li class=" tsd-kind-class">
+						<a href="WorldIndex.html" class="tsd-kind-icon">World<wbr>Index</a>
+					</li>
+					<li class=" tsd-kind-interface">
+						<a href="../interfaces/Key.html" class="tsd-kind-icon">Key</a>
+					</li>
+				</ul>
+			</nav>
+		</div>
+	</div>
+</div>
+<footer class="with-border-bottom">
+	<div class="container">
+		<h2>Legend</h2>
+		<div class="tsd-legend-group">
+			<ul class="tsd-legend">
+				<li class="tsd-kind-constructor tsd-parent-kind-class"><span class="tsd-kind-icon">Constructor</span></li>
+				<li class="tsd-kind-method tsd-parent-kind-class"><span class="tsd-kind-icon">Method</span></li>
+				<li class="tsd-kind-accessor tsd-parent-kind-class"><span class="tsd-kind-icon">Accessor</span></li>
+			</ul>
+			<ul class="tsd-legend">
+				<li class="tsd-kind-constructor tsd-parent-kind-class tsd-is-inherited"><span class="tsd-kind-icon">Inherited constructor</span></li>
+				<li class="tsd-kind-method tsd-parent-kind-class tsd-is-inherited"><span class="tsd-kind-icon">Inherited method</span></li>
+			</ul>
+			<ul class="tsd-legend">
+				<li class="tsd-kind-property tsd-parent-kind-class tsd-is-static"><span class="tsd-kind-icon">Static property</span></li>
+				<li class="tsd-kind-method tsd-parent-kind-class tsd-is-static"><span class="tsd-kind-icon">Static method</span></li>
+			</ul>
+			<ul class="tsd-legend">
+				<li class="tsd-kind-method tsd-parent-kind-interface"><span class="tsd-kind-icon">Method</span></li>
+			</ul>
+		</div>
+	</div>
+</footer>
+<div class="container tsd-generator">
+	<p>Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p>
+</div>
+<div class="overlay"></div>
+<script src="../assets/js/main.js"></script>
+</body>
+</html>
