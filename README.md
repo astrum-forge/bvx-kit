@@ -8,8 +8,6 @@
 
 **A Generic & Renderer-Agnostic BitVoxel Engine Implementation in TypeScript**
 
----
-
 **_BitVoxel Engine_** is an optimized voxel rendering and data management engine, designed to be both generic and renderer-agnostic. Written in TypeScript, it introduces a unique approach to voxel-based environments by decoupling voxel meta-data from rendering states, resulting in efficient memory usage and improved rendering performance—especially in large, destructible worlds.
 
 <h3 align="center">
