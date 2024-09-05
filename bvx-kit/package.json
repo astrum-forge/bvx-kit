@@ -1,0 +1,45 @@
+{
+  "name": "@astrumforge/bvx-kit",
+  "version": "0.0.1",
+  "description": "Generic & Renderer Agnostic BitVoxel Engine Implementation in TypeScript",
+  "main": "out/index.js",
+  "module": "out/index.js",
+  "types": "out/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "clean": "rm -rf out coverage node_modules package-lock.json && npm cache clean --force",
+    "build": "npm install && npm run build-ts",
+    "build-ts": "tsc --noEmitOnError",
+    "clean:build": "npm run clean && npm run build",
+    "clean:build-run": "npm run clean:build && node out/index.js",
+    "dev:build-run": "rm -rf out && npm run build-ts && node out/index.js",
+    "test:run": "jest",
+    "test:coverage": "rm -rf coverage && jest --clearCache && jest --coverage --runInBand --collectCoverageFrom='src/lib/**/*.{ts,tsx}'",
+    "test:ci": "jest --ci --runInBand --coverage --collectCoverageFrom='src/lib/**/*.{ts,tsx}'"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/astrum-forge/bvx-kit.git"
+  },
+  "engines": {
+    "node": ">=20.0"
+  },
+  "keywords": [
+    "voxels",
+    "voxel",
+    "bitvoxel"
+  ],
+  "author": "Astrum Forge Studios",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/astrum-forge/bvx-kit/issues"
+  },
+  "homepage": "https://github.com/astrum-forge/bvx-kit",
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
+  }
+}

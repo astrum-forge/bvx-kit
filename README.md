@@ -1,12 +1,7 @@
 <h3 align="center">
-  <img src="graphics/icon.png?raw=true" alt="OvisTek Logo" width="150">
+  <img src="graphics/icon.png?raw=true" alt="Astrum Forge Studios Logo" width="600">
 </h3>
 
-[![Twitter: @OvisTek](https://img.shields.io/badge/contact-OvisTek-blue.svg?style=flat)](https://twitter.com/OvisTek)
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/4b7dbe49f42d465bb3b6f3c669801764)](https://www.codacy.com/gh/OvisTek/bvx.ts/dashboard?utm_source=github.com&utm_medium=referral&utm_content=OvisTek/bvx.ts&utm_campaign=Badge_Grade)
-[![Coverage Badge](badges/coverage-global%20coverage.svg)](badges)
-[![install size](https://packagephobia.com/badge?p=@ovistek/bvx.ts)](https://packagephobia.com/result?p=@ovistek/bvx.ts)
-[![NPM](https://img.shields.io/npm/v/@ovistek/bvx.ts)](https://www.npmjs.com/package/@ovistek/bvx.ts)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg?style=flat)](LICENSE)
 
 #### **Generic & Renderer Agnostic BitVoxel Engine Implementation in TypeScript**
@@ -25,21 +20,20 @@ _**BitVoxel Engine**_ detaches Voxel meta-data and Rendering state data into abs
 -   BitVoxel State Layer requires **1** bit per BitVoxel
 -   Written in TypeScript with no external dependencies
 -   Designed for Robustness & Performance with 100% unit tested code
--   Documented [Code & API](https://ovistek.github.io/bvx.ts/)
 -   Permissive [MIT License](LICENSE)
 
 ### _**Installation**_
 
--   Install using [npm](https://www.npmjs.com/package/@ovistek/bvx.ts)
+-   Install using [npm](https://www.npmjs.com/package/@astrumforge/bvx-kit)
 
 ```console
-npm install @ovistek/bvx.ts
+npm install @astrumforge/bvx-kit
 ```
 
 ### _**Quick Setup**_
 
 ```TypeScript
-import { MortonKey, VoxelChunk, VoxelWorld } from '@ovistek/bvx.ts';
+import { MortonKey, VoxelChunk, VoxelWorld } from '@astrumforge/bvx-kit';
 
 // create a new world instance to manage our Voxels
 const world:VoxelWorld = new VoxelWorld();

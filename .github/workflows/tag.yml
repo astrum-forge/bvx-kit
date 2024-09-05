@@ -1,0 +1,61 @@
+name: Auto Tag and Release
+on:
+  workflow_run:
+    workflows: ['Run Jest Test Coverage']
+    types: [completed]
+    branches:
+      - 'main'
+  schedule:
+    - cron: '0 0 1,15 * *'  # Runs at midnight on the 1st and 15th of every month
+permissions: write-all
+jobs:
+  tag-and-release:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Get current date
+      id: date
+      run: echo "::set-output name=date::$(date +'%Y-%m-%d')"
+    - name: Get latest tag
+      id: latest_tag
+      run: |
+        git fetch --tags
+        latest_tag=$(git tag --sort=-v:refname | head -n 1)
+        if [ -z "$latest_tag" ]; then
+          latest_tag="1.0.0"
+        fi
+        echo "::set-output name=tag::$latest_tag"
+    - name: Parse version
+      id: parse_version
+      run: |
+        IFS='.' read -ra version <<< "${{ steps.latest_tag.outputs.tag }}"
+        x=${version[0]}
+        y=${version[1]}
+        z=${version[2]}
+        
+        if [[ "$(date +'%d')" == "01" || "$(date +'%d')" == "15" ]]; then
+          y=$((y+1))
+          z=0
+        else
+          z=$((z+1))
+        fi
+        
+        new_version="$x.$y.$z"
+        echo "::set-output name=version::$new_version"
+    - name: Create tag
+      run: |
+        git tag ${{ steps.parse_version.outputs.version }}
+        git push origin ${{ steps.parse_version.outputs.version }}
+    - name: Create release
+      uses: ncipollo/release-action@v1
+      with:
+        tag: ${{ steps.parse_version.outputs.version }}
+        name: Release ${{ steps.parse_version.outputs.version }}
+        body: |
+          Release version ${{ steps.parse_version.outputs.version }}
+          Date: ${{ steps.date.outputs.date }}
+        draft: false
+        prerelease: false
