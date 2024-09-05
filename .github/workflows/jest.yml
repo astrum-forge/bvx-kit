@@ -1,16 +1,22 @@
-name: Jest Test Coverage
+name: Run Jest Test Coverage
 on: [push]
 jobs:
-  bump:
+  run-jest-tests:
+    name: Run Unit Tests with Jest
     runs-on: ubuntu-latest
     steps:
-    - name: check out repository code
-      uses: actions/checkout@v2
-    - name: npm install
-      run: npm install
-    - name: tests
-      run: npm run test:ci
-    - name: generating coverage badges
-      uses: jpb06/jest-badges-action@v1.3.1
-      with:
-        branches: master,main
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      - uses: szenius/set-timezone@v2.0
+        with:
+          timezoneLinux: "Asia/Singapore"
+          timezoneMacos: "Asia/Singapore"
+          timezoneWindows: "Singapore Standard Time"
+      - name: Setup Node.js v20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install npm dependencies
+        run: npm --prefix ./bvx-kit install ./bvx-kit
+      - name: Run Jest tests in CI mode
+        run: npm --prefix ./bvx-kit run test:ci

@@ -1,9 +1,5 @@
-node_modules
-package-lock.json
-coverage/
+bvx-kit/package-lock.json
+bvx-kit/node_modules/
+bvx-kit/out/
+bvx-kit/coverage/
 .DS_Store
-dist/
-badges/coverage-branches.svg
-badges/coverage-functions.svg
-badges/coverage-lines.svg
-badges/coverage-statements.svg
