@@ -16,7 +16,7 @@ export class BVXGeometry {
      * 
      * NOTE: The returned array is a reference and should not be modified
      */
-    public static getVertices(): Float32Array {
+    public static get vertices(): Float32Array {
         return vertices;
     }
 
@@ -26,7 +26,7 @@ export class BVXGeometry {
      *
      * NOTE: The returned array is a reference and should not be modified
      */
-    public static getNormals(): Float32Array {
+    public static get normals(): Float32Array {
         return normals;
     }
 
@@ -39,7 +39,7 @@ export class BVXGeometry {
      * 
      * NOTE: The returned array is a reference and should not be modified
      */
-    public static getUV(): Float32Array {
+    public static get uv(): Float32Array {
         return uv;
     }
 
@@ -49,8 +49,10 @@ export class BVXGeometry {
      * as defined in getVertices() and getNormals().
      * 
      * Index computation must be re-done when Voxel Configuration changes
+     * 
      * @param geometry - The computed Voxel Geometry to use for generating Renderable Indices
      * @param optres - (optional) results buffer to use, if missing will re-create
+     * 
      * @returns - Index Array to be used for Rendering
      */
     public static getIndices(geometry: VoxelFaceGeometry, flipped: boolean = false, optres: Uint32Array | null = null): Uint32Array {
