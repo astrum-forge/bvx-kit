@@ -1,5 +1,5 @@
 <h3 align="center">
-  <img src="graphics/icon_2.png?raw=true" alt="Astrum Forge Studios Logo" width="600">
+  <img src="graphics/icon_2.png?raw=true" alt="Astrum Forge Studios Logo" width="400">
 </h3>
 
 [![License](https://img.shields.io/badge/license-MIT-orange.svg?style=flat)](LICENSE)
