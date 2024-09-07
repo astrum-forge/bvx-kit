@@ -6,14 +6,17 @@ import { VoxelWorld } from "../voxel-world.js";
 import { VoxelGeometry } from "./voxel-geometry.js";
 
 /**
- * Geometry Composer that generates a 6 bit LUT index representing the state
- * of each BitVoxel to be rendered. This is done in such a way that BitVoxels
- * completely occluded do not render and only visible/outer faces are rendered.
+ * VoxelFaceGeometry is responsible for generating the geometry index for each BitVoxel 
+ * within a VoxelChunk. This geometry index determines which faces of the voxel should be 
+ * rendered based on occlusion by neighboring voxels. Only visible or outer faces are rendered, 
+ * optimizing the rendering process.
  * 
- * The computed index needs to be inserted into a pre-defined LUT table for
- * the actual renderable geometry composition.
+ * The computed geometry index is inserted into a pre-defined LUT (Lookup Table) used by 
+ * the renderer to generate the actual geometry. This ensures that hidden or fully occluded 
+ * voxels are not rendered, improving performance.
  */
 export class VoxelFaceGeometry extends VoxelGeometry {
+    // Constants for the bit positions corresponding to the six possible voxel faces.
     public static readonly X_POS_INDEX: number = 0;
     public static readonly X_NEG_INDEX: number = 1;
     public static readonly Y_POS_INDEX: number = 2;
@@ -22,49 +25,55 @@ export class VoxelFaceGeometry extends VoxelGeometry {
     public static readonly Z_NEG_INDEX: number = 5;
 
     /**
-     * GeometryIndex for faces is only 6 bits
+     * The geometry index for faces uses 6 bits to represent which of the six faces of a 
+     * BitVoxel are visible (0-63). 
      */
     private static readonly KEY_MASK: number = BitOps.maskForBits(6);
 
     /**
-     * reusable temporary containers to work with VoxelIndex a little easier
+     * Temporary VoxelIndex objects used to simplify voxel manipulation during face calculations.
      */
     private static readonly TMP_VI_CENTER: VoxelIndex = new VoxelIndex();
     private static readonly TMP_VI_REF: VoxelIndex = new VoxelIndex();
 
     /**
-     * Re-use to get quick query access
+     * Temporary MortonKey used to represent voxel chunk positions for neighboring chunk queries.
      */
     private static readonly TMP_MK: MortonKey = new MortonKey();
 
     /**
-     * Used in-case the Neighbour chunk we want is not actually defined correctly
+     * Placeholder VoxelChunk used when neighboring chunks are not available, ensuring that 
+     * rendering continues without errors.
      */
     private static readonly TMP_CHUNK: VoxelChunk = new VoxelChunk(VoxelFaceGeometry.TMP_MK);
 
+    /**
+     * Computes the geometry indices for all BitVoxels in the given VoxelChunk. The geometry is 
+     * determined based on the visibility of each voxel's faces, considering the presence of 
+     * neighboring voxels.
+     * 
+     * Invisible or fully occluded voxels will not be rendered. The geometry index is computed 
+     * based on face visibility using neighboring chunks when necessary.
+     * 
+     * @param center - The VoxelChunk for which geometry is being generated.
+     * @param world - The VoxelWorld instance used to query neighboring chunks for boundary checks.
+     */
     public computeIndices(center: VoxelChunk, world: VoxelWorld): void {
-        // reset the internal buffer
+        // Reset the internal buffer before computing new geometry.
         this.reset();
 
-        // This VoxelChunk has no BitVoxels set (basically empty space)
-        // there is nothing to do or render, just return
-        // quick exit
+        // If the VoxelChunk is empty (no BitVoxels set), exit early as there's nothing to render.
         if (center.length <= 0) {
             return;
         }
 
-        // create local variables for quick re-use of these structures
+        // Local references for reusing objects to reduce allocations.
         const vic: VoxelIndex = VoxelFaceGeometry.TMP_VI_CENTER;
-
         const dfChunk: VoxelChunk = VoxelFaceGeometry.TMP_CHUNK;
         const dfKey: MortonKey = VoxelFaceGeometry.TMP_MK;
-
         const centerKey: MortonKey = center.key;
 
-        // get the voxel-chunk neighbours to be used for the edge-queries
-        // these are replaced by the default-zero dfChunk if chunks cannot be found
-        // in the world. Due to memory constraints some chunks may not be defined
-        // and loaded ad-hoc. For those scenarios we just render all the faces
+        // Get neighboring chunks or use the default chunk if they are not available.
         const xp: VoxelChunk = world.getOpt(centerKey.copy(dfKey).incX(), dfChunk);
         const xn: VoxelChunk = world.getOpt(centerKey.copy(dfKey).decX(), dfChunk);
         const yp: VoxelChunk = world.getOpt(centerKey.copy(dfKey).incY(), dfChunk);
@@ -72,10 +81,10 @@ export class VoxelFaceGeometry extends VoxelGeometry {
         const zp: VoxelChunk = world.getOpt(centerKey.copy(dfKey).incZ(), dfChunk);
         const zn: VoxelChunk = world.getOpt(centerKey.copy(dfKey).decZ(), dfChunk);
 
-        // the indices we will be using to write into
+        // The array that holds the computed geometry indices for the chunk.
         const indices: Uint8Array = this.indices;
 
-        // push the BitVoxel LUT indices onto the stack for quicker access
+        // Bit positions for each face in the 6-bit geometry index.
         const xPosIndex: number = VoxelFaceGeometry.X_POS_INDEX;
         const xNegIndex: number = VoxelFaceGeometry.X_NEG_INDEX;
         const yPosIndex: number = VoxelFaceGeometry.Y_POS_INDEX;
@@ -84,44 +93,31 @@ export class VoxelFaceGeometry extends VoxelGeometry {
         const zNegIndex: number = VoxelFaceGeometry.Z_NEG_INDEX;
         const mask: number = VoxelFaceGeometry.KEY_MASK;
 
-        // loop through all bit-voxels and generate the geometry index for each one
-        // each VoxelChunk has 4 x 4 x 4 = 64 Voxels
-        // each Voxel has 4 x 4 x 4 = 64 BitVoxels
-        // therefore each VoxelChunk has 4096 BitVoxels
+        // Loop through all BitVoxels in the chunk (16x16x16 = 4096 BitVoxels).
         const length: number = this.length;
 
         for (let index: number = 0; index < length; index++) {
-            // set the key as the index
             vic.key = index;
 
             const bvState: number = center.getBitVoxel(vic);
 
-            // nothing to do if bitvoxel does not want to be rendered
-            // default GeometryIndex of 0 renders nothing
+            // Skip if the BitVoxel is not set (no geometry to render for this voxel).
             if (bvState === 0) {
                 continue;
             }
 
-            // otherwise, BitVoxel is in the ON state, we need to figure
-            // out which faces of the BV we want to render
-
-            // This is the 6 bit GeometryIndex (GI) for this BitVoxel
+            // Initialize the geometry index for this BitVoxel.
             let geometryIndex: number = indices[index];
 
-            // compute the +x state of geometry index from neighbour
-            const bvxp = VoxelFaceGeometry._GetBitVoxelXP(vic, center, xp);
-            // compute the -x state of geometry index from neighbour
-            const bvxn = VoxelFaceGeometry._GetBitVoxelXN(vic, center, xn);
-            // compute the +y state of geometry index from neighbour
-            const bvyp = VoxelFaceGeometry._GetBitVoxelYP(vic, center, yp);
-            // compute the -y state of geometry index from neighbour
-            const bvyn = VoxelFaceGeometry._GetBitVoxelYN(vic, center, yn);
-            // compute the +z state of geometry index from neighbour
-            const bvzp = VoxelFaceGeometry._GetBitVoxelZP(vic, center, zp);
-            // compute the -z state of geometry index from neighbour
-            const bvzn = VoxelFaceGeometry._GetBitVoxelZN(vic, center, zn);
+            // Compute the face visibility based on neighboring voxels.
+            const bvxp = VoxelFaceGeometry._GetBitVoxelXP(vic, center, xp); // +x face
+            const bvxn = VoxelFaceGeometry._GetBitVoxelXN(vic, center, xn); // -x face
+            const bvyp = VoxelFaceGeometry._GetBitVoxelYP(vic, center, yp); // +y face
+            const bvyn = VoxelFaceGeometry._GetBitVoxelYN(vic, center, yn); // -y face
+            const bvzp = VoxelFaceGeometry._GetBitVoxelZP(vic, center, zp); // +z face
+            const bvzn = VoxelFaceGeometry._GetBitVoxelZN(vic, center, zn); // -z face
 
-            // set the required bits so we know which faces we need to render
+            // Update the geometry index based on face visibility.
             geometryIndex = BitOps.setBit(geometryIndex, xPosIndex, (~bvxp) & 1);
             geometryIndex = BitOps.setBit(geometryIndex, xNegIndex, (~bvxn) & 1);
             geometryIndex = BitOps.setBit(geometryIndex, yPosIndex, (~bvyp) & 1);
@@ -129,254 +125,128 @@ export class VoxelFaceGeometry extends VoxelGeometry {
             geometryIndex = BitOps.setBit(geometryIndex, zPosIndex, (~bvzp) & 1);
             geometryIndex = BitOps.setBit(geometryIndex, zNegIndex, (~bvzn) & 1);
 
-            // update geometry index for this BitVoxel
+            // Store the computed geometry index in the array.
             indices[index] = geometryIndex & mask;
         }
     }
 
     /**
-     * Calculates and Returns the BitVoxel state for the +x coordinate from provided target
+     * Retrieves the state of the BitVoxel on the +x face.
      */
     private static _GetBitVoxelXP(index: VoxelIndex, c: VoxelChunk, next: VoxelChunk): number {
-        // these are the voxel coordinates (4x4x4)
-        const vx: number = index.vx;
-        const vy: number = index.vy;
-        const vz: number = index.vz;
+        let vt: number = index.vx;
+        let bt: number = index.bx + 1;
 
-        // these are the bitvoxel coordinates (4x4x4) relative to voxel
-        const bx: number = index.bx;
-        const by: number = index.by;
-        const bz: number = index.bz;
-
-        // default to center for now unless we decide to switch
-        let targetChunk: VoxelChunk = c;
-
-        // we need to figure out which chunk to use to grab the bitvoxel state
-        // grab coordinates to use for target coordinate
-        let vt: number = vx;
-        let bt: number = bx + 1;
-
-        // check bounds for bitvoxel, if out of bounds we need to increment the voxel
         if (bt > 3) {
             bt = 0;
-
-            // increment voxel coordinate lookup as bitvoxel bounds are reached
             vt += 1;
 
-            // if voxel bounds are reached, we need to switch the VoxelChunk target
             if (vt > 3) {
                 vt = 0;
-
-                targetChunk = next;
+                return next.getBitVoxel(VoxelIndex.from(vt, index.vy, index.vz, bt, index.by, index.bz, VoxelFaceGeometry.TMP_VI_REF));
             }
         }
 
-        // return the neighbouring bitvoxel state
-        return targetChunk.getBitVoxel(VoxelIndex.from(vt, vy, vz, bt, by, bz, VoxelFaceGeometry.TMP_VI_REF));
+        return c.getBitVoxel(VoxelIndex.from(vt, index.vy, index.vz, bt, index.by, index.bz, VoxelFaceGeometry.TMP_VI_REF));
     }
 
     /**
-     * Calculates and Returns the BitVoxel state for the -x coordinate from provided target
+     * Retrieves the state of the BitVoxel on the -x face.
      */
     private static _GetBitVoxelXN(index: VoxelIndex, c: VoxelChunk, next: VoxelChunk): number {
-        // these are the voxel coordinates (4x4x4)
-        const vx: number = index.vx;
-        const vy: number = index.vy;
-        const vz: number = index.vz;
+        let vt: number = index.vx;
+        let bt: number = index.bx - 1;
 
-        // these are the bitvoxel coordinates (4x4x4) relative to voxel
-        const bx: number = index.bx;
-        const by: number = index.by;
-        const bz: number = index.bz;
-
-        // default to center for now unless we decide to switch
-        let targetChunk: VoxelChunk = c;
-
-        // we need to figure out which chunk to use to grab the bitvoxel state
-        // grab coordinates to use for target coordinate
-        let vt: number = vx;
-        let bt: number = bx - 1;
-
-        // check bounds for bitvoxel, if out of bounds we need to increment the voxel
         if (bt < 0) {
             bt = 3;
-
-            // increment voxel coordinate lookup as bitvoxel bounds are reached
             vt -= 1;
 
-            // if voxel bounds are reached, we need to switch the VoxelChunk target
             if (vt < 0) {
                 vt = 3;
-
-                targetChunk = next;
+                return next.getBitVoxel(VoxelIndex.from(vt, index.vy, index.vz, bt, index.by, index.bz, VoxelFaceGeometry.TMP_VI_REF));
             }
         }
 
-        // return the neighbouring bitvoxel state
-        return targetChunk.getBitVoxel(VoxelIndex.from(vt, vy, vz, bt, by, bz, VoxelFaceGeometry.TMP_VI_REF));
+        return c.getBitVoxel(VoxelIndex.from(vt, index.vy, index.vz, bt, index.by, index.bz, VoxelFaceGeometry.TMP_VI_REF));
     }
 
     /**
-     * Calculates and Returns the BitVoxel state for the +y coordinate from provided target
+     * Retrieves the state of the BitVoxel on the +y face.
      */
     private static _GetBitVoxelYP(index: VoxelIndex, c: VoxelChunk, next: VoxelChunk): number {
-        // these are the voxel coordinates (4x4x4)
-        const vx: number = index.vx;
-        const vy: number = index.vy;
-        const vz: number = index.vz;
+        let vt: number = index.vy;
+        let bt: number = index.by + 1;
 
-        // these are the bitvoxel coordinates (4x4x4) relative to voxel
-        const bx: number = index.bx;
-        const by: number = index.by;
-        const bz: number = index.bz;
-
-        // default to center for now unless we decide to switch
-        let targetChunk: VoxelChunk = c;
-
-        // we need to figure out which chunk to use to grab the bitvoxel state
-        // grab coordinates to use for target coordinate
-        let vt: number = vy;
-        let bt: number = by + 1;
-
-        // check bounds for bitvoxel, if out of bounds we need to increment the voxel
         if (bt > 3) {
             bt = 0;
-
-            // increment voxel coordinate lookup as bitvoxel bounds are reached
             vt += 1;
 
-            // if voxel bounds are reached, we need to switch the VoxelChunk target
             if (vt > 3) {
                 vt = 0;
-
-                targetChunk = next;
+                return next.getBitVoxel(VoxelIndex.from(index.vx, vt, index.vz, index.bx, bt, index.bz, VoxelFaceGeometry.TMP_VI_REF));
             }
         }
 
-        // return the neighbouring bitvoxel state
-        return targetChunk.getBitVoxel(VoxelIndex.from(vx, vt, vz, bx, bt, bz, VoxelFaceGeometry.TMP_VI_REF));
+        return c.getBitVoxel(VoxelIndex.from(index.vx, vt, index.vz, index.bx, bt, index.bz, VoxelFaceGeometry.TMP_VI_REF));
     }
 
     /**
-     * Calculates and Returns the BitVoxel state for the -y coordinate from provided target
+     * Retrieves the state of the BitVoxel on the -y face.
      */
     private static _GetBitVoxelYN(index: VoxelIndex, c: VoxelChunk, next: VoxelChunk): number {
-        // these are the voxel coordinates (4x4x4)
-        const vx: number = index.vx;
-        const vy: number = index.vy;
-        const vz: number = index.vz;
+        let vt: number = index.vy;
+        let bt: number = index.by - 1;
 
-        // these are the bitvoxel coordinates (4x4x4) relative to voxel
-        const bx: number = index.bx;
-        const by: number = index.by;
-        const bz: number = index.bz;
-
-        // default to center for now unless we decide to switch
-        let targetChunk: VoxelChunk = c;
-
-        // we need to figure out which chunk to use to grab the bitvoxel state
-        // grab coordinates to use for target coordinate
-        let vt: number = vy;
-        let bt: number = by - 1;
-
-        // check bounds for bitvoxel, if out of bounds we need to increment the voxel
         if (bt < 0) {
             bt = 3;
-
-            // increment voxel coordinate lookup as bitvoxel bounds are reached
             vt -= 1;
 
-            // if voxel bounds are reached, we need to switch the VoxelChunk target
             if (vt < 0) {
                 vt = 3;
-
-                targetChunk = next;
+                return next.getBitVoxel(VoxelIndex.from(index.vx, vt, index.vz, index.bx, bt, index.bz, VoxelFaceGeometry.TMP_VI_REF));
             }
         }
 
-        // return the neighbouring bitvoxel state
-        return targetChunk.getBitVoxel(VoxelIndex.from(vx, vt, vz, bx, bt, bz, VoxelFaceGeometry.TMP_VI_REF));
+        return c.getBitVoxel(VoxelIndex.from(index.vx, vt, index.vz, index.bx, bt, index.bz, VoxelFaceGeometry.TMP_VI_REF));
     }
 
     /**
-     * Calculates and Returns the BitVoxel state for the +z coordinate from provided target
+     * Retrieves the state of the BitVoxel on the +z face.
      */
     private static _GetBitVoxelZP(index: VoxelIndex, c: VoxelChunk, next: VoxelChunk): number {
-        // these are the voxel coordinates (4x4x4)
-        const vx: number = index.vx;
-        const vy: number = index.vy;
-        const vz: number = index.vz;
+        let vt: number = index.vz;
+        let bt: number = index.bz + 1;
 
-        // these are the bitvoxel coordinates (4x4x4) relative to voxel
-        const bx: number = index.bx;
-        const by: number = index.by;
-        const bz: number = index.bz;
-
-        // default to center for now unless we decide to switch
-        let targetChunk: VoxelChunk = c;
-
-        // we need to figure out which chunk to use to grab the bitvoxel state
-        // grab coordinates to use for target coordinate
-        let vt: number = vz;
-        let bt: number = bz + 1;
-
-        // check bounds for bitvoxel, if out of bounds we need to increment the voxel
         if (bt > 3) {
             bt = 0;
-
-            // increment voxel coordinate lookup as bitvoxel bounds are reached
             vt += 1;
 
-            // if voxel bounds are reached, we need to switch the VoxelChunk target
             if (vt > 3) {
                 vt = 0;
-
-                targetChunk = next;
+                return next.getBitVoxel(VoxelIndex.from(index.vx, index.vy, vt, index.bx, index.by, bt, VoxelFaceGeometry.TMP_VI_REF));
             }
         }
 
-        // return the neighbouring bitvoxel state
-        return targetChunk.getBitVoxel(VoxelIndex.from(vx, vy, vt, bx, by, bt, VoxelFaceGeometry.TMP_VI_REF));
+        return c.getBitVoxel(VoxelIndex.from(index.vx, index.vy, vt, index.bx, index.by, bt, VoxelFaceGeometry.TMP_VI_REF));
     }
 
     /**
-     * Calculates and Returns the BitVoxel state for the -z coordinate from provided target
+     * Retrieves the state of the BitVoxel on the -z face.
      */
     private static _GetBitVoxelZN(index: VoxelIndex, c: VoxelChunk, next: VoxelChunk): number {
-        // these are the voxel coordinates (4x4x4)
-        const vx: number = index.vx;
-        const vy: number = index.vy;
-        const vz: number = index.vz;
+        let vt: number = index.vz;
+        let bt: number = index.bz - 1;
 
-        // these are the bitvoxel coordinates (4x4x4) relative to voxel
-        const bx: number = index.bx;
-        const by: number = index.by;
-        const bz: number = index.bz;
-
-        // default to center for now unless we decide to switch
-        let targetChunk: VoxelChunk = c;
-
-        // we need to figure out which chunk to use to grab the bitvoxel state
-        // grab coordinates to use for target coordinate
-        let vt: number = vz;
-        let bt: number = bz - 1;
-
-        // check bounds for bitvoxel, if out of bounds we need to increment the voxel
         if (bt < 0) {
             bt = 3;
-
-            // increment voxel coordinate lookup as bitvoxel bounds are reached
             vt -= 1;
 
-            // if voxel bounds are reached, we need to switch the VoxelChunk target
             if (vt < 0) {
                 vt = 3;
-
-                targetChunk = next;
+                return next.getBitVoxel(VoxelIndex.from(index.vx, index.vy, vt, index.bx, index.by, bt, VoxelFaceGeometry.TMP_VI_REF));
             }
         }
 
-        // return the neighbouring bitvoxel state
-        return targetChunk.getBitVoxel(VoxelIndex.from(vx, vy, vt, bx, by, bt, VoxelFaceGeometry.TMP_VI_REF));
+        return c.getBitVoxel(VoxelIndex.from(index.vx, index.vy, vt, index.bx, index.by, bt, VoxelFaceGeometry.TMP_VI_REF));
     }
 }

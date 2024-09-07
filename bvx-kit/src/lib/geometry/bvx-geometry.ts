@@ -6,62 +6,73 @@ import uv from "./lut/bvx-uv.js";
 import { VoxelFaceGeometry } from "../engine/geometry/voxel-face-geometry.js";
 
 /**
- * Allows computing a renderable geometry to visualise BitVoxels in a rendering engine
+ * BVXGeometry is responsible for computing and providing renderable geometry data 
+ * for BitVoxel visualization. It provides access to static vertex, normal, and UV arrays
+ * and methods for generating renderable indices used in a rendering engine.
  */
 export class BVXGeometry {
 
     /**
-     * Returns a static vertices array that represents a single chunk of 
-     * 4x4x4 Voxels or 16x16x16 BitVoxels.
+     * Provides the vertex data for a chunk of 16x16x16 BitVoxels (4x4x4 Voxels).
      * 
-     * NOTE: The returned array is a reference and should not be modified
+     * This array contains the precomputed vertex positions for each voxel in the chunk.
+     * 
+     * @returns - A Float32Array containing the vertex positions.
+     * 
+     * NOTE: The returned array is a static reference and should not be modified directly.
      */
     public static get vertices(): Float32Array {
         return vertices;
     }
 
     /**
-     * Returns a static normals array that represents a single chunk of
-     * 4x4x4 Voxels or 16x16x16 BitVoxels.
-     *
-     * NOTE: The returned array is a reference and should not be modified
+     * Provides the normal vectors for each vertex in a chunk of 16x16x16 BitVoxels (4x4x4 Voxels).
+     * 
+     * The normals define the direction each face of the voxel is facing, used for lighting calculations.
+     * 
+     * @returns - A Float32Array containing the normal vectors.
+     * 
+     * NOTE: The returned array is a static reference and should not be modified directly.
      */
     public static get normals(): Float32Array {
         return normals;
     }
 
     /**
-     * Returns a static UV array that represents a single chunk of
-     * 4x4x4 Voxels or 16x16x16 BitVoxels.
+     * Provides the UV mapping data for a chunk of 16x16x16 BitVoxels (4x4x4 Voxels).
      * 
-     * Each BitVoxel Face has an independent UV map attached. This map
-     * needs to be modified externally based on texture.
+     * Each voxel face has its own UV coordinates, which define how textures are mapped to each face.
      * 
-     * NOTE: The returned array is a reference and should not be modified
+     * @returns - A Float32Array containing the UV coordinates for each voxel face.
+     * 
+     * NOTE: The returned array is a static reference and should not be modified directly. 
+     * Modifications should be done externally for different textures.
      */
     public static get uv(): Float32Array {
         return uv;
     }
 
     /**
-     * Provided a fully-configured and computed Voxel Geometry, generate the required indices
-     * to be used for rendering purposes. These indices will refer to vertex and normal positions
-     * as defined in getVertices() and getNormals().
+     * Generates the indices array for rendering a computed Voxel geometry. The indices define 
+     * how the vertices are connected to form triangles for rendering purposes. 
      * 
-     * Index computation must be re-done when Voxel Configuration changes
+     * This method creates an index buffer based on the voxel face geometry, 
+     * mapping the voxel configuration to the correct set of triangles.
      * 
-     * @param geometry - The computed Voxel Geometry to use for generating Renderable Indices
-     * @param optres - (optional) results buffer to use, if missing will re-create
+     * @param geometry - The VoxelFaceGeometry containing the voxel configuration.
+     * @param flipped - Whether to use flipped indices for rendering.
+     * @param optres - (Optional) A pre-allocated Uint32Array for the results to reduce allocations.
      * 
-     * @returns - Index Array to be used for Rendering
+     * @returns - A Uint32Array containing the indices for rendering the voxel faces.
+     * 
+     * NOTE: The generated indices are used in conjunction with the vertex and normal arrays for rendering.
      */
     public static getIndices(geometry: VoxelFaceGeometry, flipped: boolean = false, optres: Uint32Array | null = null): Uint32Array {
         const numberOfFaces: number = geometry.popCount();
-        const numberOfIndices: number = numberOfFaces * 6;
+        const numberOfIndices: number = numberOfFaces * 6; // 6 indices per face (2 triangles per face)
         const result = optres || new Uint32Array(numberOfIndices);
 
-        // we must have enough room to store all our indices
-        // each face has 2 triangles and each triangle has 3 indices
+        // Ensure the provided result buffer has the correct length
         if (result.length !== numberOfIndices) {
             throw new RangeError("BVXGeometry.getIndices() - optional parameter does not have a valid length, expected " + numberOfIndices + " but was " + result.length);
         }
@@ -75,18 +86,16 @@ export class BVXGeometry {
         for (let index: number = 0; index < length; index++) {
             const gi: number = geometryIndices[index];
 
-            // there is nothing to render for this index, just skip
+            // Skip if the voxel face is not active (0 means no voxel face)
             if (gi === 0) {
                 continue;
             }
 
-            // otherwise, we need to add and offset indices, check which
-            // voxel configuration we want to render
+            // Retrieve the corresponding set of indices for the current voxel configuration
             const configuration: Uint32Array = renderableIndices[gi];
             const clength: number = configuration.length;
 
-            // offset the indices to the desired voxel position and
-            // add to the total
+            // Offset the indices by the voxel's position and add to the result array
             for (let cindex: number = 0; cindex < clength; cindex++) {
                 result[counter] = configuration[cindex] + (index * 24);
                 counter++;

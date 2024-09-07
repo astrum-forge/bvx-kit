@@ -4,59 +4,70 @@ import { VoxelRaycaster } from "./raycaster/voxel-raycaster.js";
 import { VoxelChunk } from "./chunks/voxel-chunk.js";
 
 /**
- * VoxelWorld manages a single world instance of a collection of Voxels.
- * Storage is managed by MortonKeys that represents the world coordinate
- * for each individual VoxelChunk.
+ * VoxelWorld manages a collection of voxel chunks in a 3D space.
+ * Each chunk is indexed and stored using a MortonKey, which encodes the world
+ * coordinates for the chunk. The system allows for efficient spatial querying
+ * and manipulation of voxel data.
  * 
- * Each MortonKey can contain 0-1023 values on each of the x,y,z axis
- * Each VoxelChunk contains 4 x 4 x 4 Voxels
- * Each Voxel contains 4 x 4 x 4 BitVoxels
+ * Structure:
+ * - Each MortonKey can address up to 1024 values per axis (x, y, z).
+ * - Each VoxelChunk contains a 4x4x4 grid of voxels.
+ * - Each voxel contains a 4x4x4 grid of BitVoxels.
  * 
- * If we take the assumption that each Voxel is 1m x 1m x 1m in size, then
- * VoxelWorld can contain a maximum map of 4096m x 4096m x 4096m or 4km^3
- * 
- * For game engines or Renderers that want to have bigger maps, they can always
- * spawn additional independent VoxelWorld instances and manage the coordinates
- * accordingly.
+ * Assuming each voxel is 1 meter in size, the VoxelWorld can span up to 
+ * 4096m x 4096m x 4096m (4km³). For larger maps, multiple VoxelWorld instances
+ * can be used, with external systems managing the world coordinates across
+ * instances.
  */
 export class VoxelWorld {
     /**
-     * Construct a HashGrid storage that can be queried using a provided
-     * MortonKey and stores instances of VoxelChunk types
+     * HashGrid structure that stores and indexes VoxelChunks using MortonKeys.
+     * This grid allows fast lookups of voxel chunks based on their spatial location.
      */
     private readonly _voxelChunks: HashGrid<MortonKey, VoxelChunk>;
+
+    /**
+     * The VoxelRaycaster provides functionality for raycasting through the voxel world,
+     * allowing for efficient querying and voxel picking (e.g., for player interactions).
+     */
     private readonly _voxelRaycaster: VoxelRaycaster;
 
     constructor() {
-        // init with 1024 buckets for now, this can be increased to decrease
-        // the O(n) search space for more constant lookups at cost of memory
+        // Initialize the HashGrid with 1024 buckets. This can be increased to improve
+        // lookup performance at the cost of more memory usage.
         this._voxelChunks = new HashGrid<MortonKey, VoxelChunk>(1024);
 
-        // provides a Raycaster instance to query the data contained in this world
+        // Initialize the VoxelRaycaster for querying voxel data within this world.
         this._voxelRaycaster = new VoxelRaycaster(this);
     }
 
     /**
-     * Returns the Raycaster structure that allows picking Voxels using a VoxelRay
+     * Provides access to the VoxelRaycaster, which allows for raycasting operations
+     * (e.g., picking voxels based on a ray or line of sight).
+     * 
+     * @returns - The VoxelRaycaster instance for this VoxelWorld.
      */
     public get raycaster(): VoxelRaycaster {
         return this._voxelRaycaster;
     }
 
     /**
-     * Returns a VoxelChunk from the provided Morton Key
-     * @param key - The key used to store the required VoxelChunk
-     * @returns - VoxelChunk instance or null
+     * Retrieves a VoxelChunk stored at the provided MortonKey.
+     * 
+     * @param key - The MortonKey representing the chunk's spatial location.
+     * @returns - The VoxelChunk at the specified key, or null if it does not exist.
      */
     public get(key: MortonKey): VoxelChunk | null {
         return this._voxelChunks.get(key);
     }
 
     /**
-     * Returns a VoxelChunk from the provided Morton Key
-     * @param key - The key used to store the required VoxelChunk
-     * @param optret - (optional) item to return if VoxelChunk is null
-     * @returns - VoxelChunk instance or null
+     * Retrieves a VoxelChunk from the provided MortonKey, returning a default value if
+     * the chunk is not found.
+     * 
+     * @param key - The MortonKey representing the chunk's spatial location.
+     * @param optret - The default VoxelChunk to return if the key is not found.
+     * @returns - The VoxelChunk at the specified key or the provided default chunk if not found.
      */
     public getOpt(key: MortonKey, optret: VoxelChunk): VoxelChunk {
         const retItem: VoxelChunk | null = this.get(key);
@@ -69,18 +80,21 @@ export class VoxelWorld {
     }
 
     /**
-     * Inserts a new VoxelChunk instance at the provided Morton Key Coordinate
-     * @param chunk - The Chunk instance to insert
+     * Inserts a new VoxelChunk into the VoxelWorld at the specified MortonKey.
+     * 
+     * @param chunk - The VoxelChunk to insert. The chunk's key will be used as the 
+     * spatial index for storage.
      */
     public insert(chunk: VoxelChunk): void {
         this._voxelChunks.set(chunk.key, chunk);
     }
 
     /**
-     * Removes a previous instance of VoxelChunk from provided Morton Key Coordinate
-     * @param key - The Morton Key Coordinate
-     * @returns - Returns true if removed or false otherwise. If returns false then there
-     * was nothing to return
+     * Removes a VoxelChunk from the VoxelWorld at the specified MortonKey.
+     * 
+     * @param key - The MortonKey representing the chunk's spatial location.
+     * @returns - True if the chunk was successfully removed, or false if no chunk 
+     * was found at the key.
      */
     public remove(key: MortonKey): boolean {
         return this._voxelChunks.remove(key);
