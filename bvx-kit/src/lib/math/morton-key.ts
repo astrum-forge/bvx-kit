@@ -323,6 +323,6 @@ export class MortonKey implements Key {
      * @returns - A string representation of the key and its x, y, z values.
      */
     toString(): string {
-        return `MortonKey - key:${this.key} x:${this.x} y:${this.y} z:${this.z}`;
+        return `MortonKey { key: ${this.key}, x: ${this.x}, y: ${this.y}, z: ${this.z} }`;
     }
 }

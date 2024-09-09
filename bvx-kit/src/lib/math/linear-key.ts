@@ -241,6 +241,6 @@ export class LinearKey implements Key {
      * @returns - A string representation of the key and its x, y, z values.
      */
     toString(): string {
-        return `LinearKey - key:${this.key} x:${this.x} y:${this.y} z:${this.z}`;
+        return `LinearKey { key: ${this.key}, x: ${this.x}, y: ${this.y}, z: ${this.z} }`;
     }
 }

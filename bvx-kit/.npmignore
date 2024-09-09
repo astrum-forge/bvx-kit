@@ -5,3 +5,4 @@ coverage/
 tsconfig.json
 package-lock.json
 jest.config.ts
+.npmrc
