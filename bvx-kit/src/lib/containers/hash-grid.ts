@@ -1,87 +1,113 @@
 import { Key } from "../math/key.js";
 
 /**
- * Internal node for managing the HashGrid structure. contains
- * read-only key-value pairs.
+ * Internal class representing a key-value pair stored in the HashGrid.
+ * Each Node contains a read-only key and a value. 
  */
 class Node<V> {
-    // this is the encoded key stores as a number
+    // Encoded key stored as a number
     public readonly key: number;
     public value: V;
 
+    /**
+     * Constructs a new Node with a key-value pair.
+     * 
+     * @param key - The key (encoded as a number) to be stored in the Node.
+     * @param value - The associated value to be stored.
+     */
     constructor(key: number, value: V) {
-        // key is cloned so reference is not changed externally
+        // Key is cloned to ensure that external changes don't affect the internal state
         this.key = key;
         this.value = value;
     }
 }
 
 /**
- * HashGrid contains a set of key-value pairs with a constant length of buckets
- * designed to work with the Key structure. Specifically, MortonKey provides an excellent
- * distribution of 3D data for fast access.
+ * HashGrid is a hash-based data structure that stores key-value pairs across a fixed 
+ * number of buckets. It is optimized for working with 3D data keys, such as MortonKeys, 
+ * which are used for fast spatial lookups.
+ * 
+ * The HashGrid distributes the keys into buckets and allows efficient retrieval, insertion, 
+ * and deletion of key-value pairs. MortonKey or any Key implementation can be used as a key.
  */
 export class HashGrid<K extends Key, V> {
+    /**
+     * Default size for the number of buckets in the hash grid.
+     */
     public static readonly DEFAULT_SIZE: number = 1024;
 
+    /**
+     * The internal dictionary (an array of arrays) storing buckets of Node objects.
+     */
     private readonly _dict: Array<Array<Node<V>>>;
+
+    /**
+     * The number of hash buckets in the grid.
+     */
     private readonly _size: number;
 
+    /**
+     * Constructs a new HashGrid with a specified number of buckets.
+     * 
+     * @param buckets - Number of buckets to allocate for the hash grid. Defaults to DEFAULT_SIZE (1024).
+     */
     constructor(buckets: number = HashGrid.DEFAULT_SIZE) {
+        // Ensure the size is greater than 0, or use the default size
         this._size = buckets > 0 ? buckets : HashGrid.DEFAULT_SIZE;
         this._dict = new Array<Array<Node<V>>>(this._size);
     }
 
     /**
-     * Returns the number of Hash Buckets
+     * Returns the number of hash buckets in the grid.
      */
     public get size(): number {
         return this._size;
     }
 
     /**
-     * Internal function that calculates and return an appropriate bucket for the provided key
+     * Calculates and returns the appropriate bucket for the provided key.
+     * 
+     * @param key - The key used to determine the bucket.
+     * @returns - The array of Node objects in the bucket, or null if the bucket is empty.
      */
     private _GetKeyBucket(key: K): Array<Node<V>> | null {
         const value: Array<Node<V>> | null | undefined = this._dict[key.key % this._size];
-
         return value ? value : null;
     }
 
     /**
-     * Given a key, search and return the Node Reference attached to the key
-     * This is meant to be used internally only as Node should not be exposed
-     * externally.
-     * @param key - Key to use for search
-     * @returns - Node Reference if found or null
+     * Searches for and returns the Node reference associated with the given key.
+     * This is an internal method and is not exposed to external classes.
+     * 
+     * @param key - The key to search for.
+     * @returns - The Node reference if found, or null if not found.
      */
     private _Get(key: K): Node<V> | null {
         const bucket: Array<Node<V>> | null = this._GetKeyBucket(key);
 
         if (bucket !== null) {
-            // NOTE - This should be optimised from O(n) to O(log(n))
-            // This can be done by ensuring that data is sorted (can do that during insert)
-            // see set() method
+            // NOTE: This is a linear O(n) search. Optimization to O(log(n)) can be done by sorting.
             const length: number = bucket.length;
 
-            for (let i: number = 0; i < length; i++) {
+            for (let i = 0; i < length; i++) {
                 const node: Node<V> | undefined | null = bucket[i];
 
-                // we found our object, return and terminate
+                // Return the node if the keys match
                 if (node && node.key === key.key) {
                     return node;
                 }
             }
         }
 
-        // nothing found, return nothing
+        // Return null if no matching key was found
         return null;
     }
 
     /**
-     * Given a key, search and return the value attached to the key
-     * @param key - Key to use for search
-     * @returns - Value if found or null
+     * Searches for and returns the value associated with the given key.
+     * 
+     * @param key - The key to search for.
+     * @returns - The associated value if found, or null if not found.
      */
     public get(key: K): V | null {
         const node: Node<V> | null = this._Get(key);
@@ -94,48 +120,49 @@ export class HashGrid<K extends Key, V> {
     }
 
     /**
-     * Sets a provided Value for the provided Key. This will replace a previous
-     * value if it exists
-     * @param key - The key to use
-     * @param value - The value to set
+     * Inserts or updates a key-value pair in the hash grid. If the key already exists,
+     * the value is updated.
+     * 
+     * @param key - The key to insert or update.
+     * @param value - The value to associate with the key.
      */
     public set(key: K, value: V): void {
         const node: Node<V> | null = this._Get(key);
 
-        // first time inserting this object
+        // Insert a new key-value pair if the key doesn't exist
         if (node === null) {
             const bucketKey: number = key.key % this._size;
             const bucket: Array<Node<V>> | undefined | null = this._dict[bucketKey];
 
-            // bucket exists, just append
+            // Append to the bucket if it exists
             if (bucket) {
                 bucket.push(new Node<V>(key.key, value));
             }
             else {
-                // otherwise, initialise a new bucket with our requested node
+                // Create a new bucket and insert the node
                 this._dict[bucketKey] = new Array<Node<V>>(new Node<V>(key.key, value));
             }
         }
         else {
+            // Update the value if the key already exists
             node.value = value;
         }
     }
 
     /**
-     * Deletes the entry for the provided key if it exists
-     * @param key - The key to use for removal
-     * @returns - Returns true if a value was removed, false otherwise
+     * Removes the key-value pair associated with the given key, if it exists.
+     * 
+     * @param key - The key to remove.
+     * @returns - True if the key was found and removed, false otherwise.
      */
     public remove(key: K): boolean {
         const node: Node<V> | null = this._Get(key);
 
         if (node !== null) {
-            // if statements here will never execute, so we never need them
-            // @ts-ignore
-            const bucket: Array<Node<K, V>> = this._GetKeyBucket(key);
+            const bucket: Array<Node<V>> = this._GetKeyBucket(key) as Array<Node<V>>;
             const index: number = bucket.indexOf(node);
 
-            // remove the item
+            // Remove the node from the bucket
             bucket.splice(index, 1);
 
             return true;

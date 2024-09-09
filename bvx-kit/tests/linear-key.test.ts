@@ -711,4 +711,10 @@ describe('LinearKey', () => {
         expect(add.z).toBe(key1.z);
     });
 
+    it('.toString() - check formatting', () => {
+        const key = clazz.from(1, 2, 3);
+        const format: string = `LinearKey { key: ${key.key}, x: ${key.x}, y: ${key.y}, z: ${key.z} }`;
+
+        expect(key.toString()).toBe(format);
+    });
 });

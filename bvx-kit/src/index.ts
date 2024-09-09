@@ -23,3 +23,6 @@ export { VoxelGeometry } from "./lib/engine/geometry/voxel-geometry.js";
 export { VoxelFaceGeometry } from "./lib/engine/geometry/voxel-face-geometry.js";
 export { VoxelRay } from "./lib/engine/raycaster/voxel-ray.js";
 export { VoxelRaycaster } from "./lib/engine/raycaster/voxel-raycaster.js";
+
+// export generators
+export { BVXGeometry } from "./lib/geometry/bvx-geometry.js";

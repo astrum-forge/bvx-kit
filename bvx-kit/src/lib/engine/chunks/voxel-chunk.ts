@@ -3,146 +3,168 @@ import { BVXLayer } from "../layer/bvx-layer.js";
 import { VoxelIndex } from "../voxel-index.js";
 
 /**
- * A single VoxelChunk manages a group of voxels and their states for a specific
- * location in a 3D Voxel map. The internals are designed to be easy to transmit and
- * store in a virtual server or on local disk.
- *
- * VoxelChunk stores 64 Voxels where each voxel contains 64 bits of data
- *
- * Each VoxelChunk stores 64 voxels and 4096 bit-voxels. Geometry is generated according
- * to the makeup of the bit-voxels which provides 2^64 different geometry configurations on
- * a per Voxel basis
+ * A VoxelChunk represents a group of 64 voxels (4x4x4) and manages their states in a 3D voxel map. 
+ * Each voxel in a chunk contains 64 BitVoxels, which can be toggled on or off (1 or 0).
+ * 
+ * VoxelChunk is designed to be lightweight and easy to transmit or store, making it suitable 
+ * for server-side or local storage use. It supports efficient manipulation of BitVoxels and 
+ * provides fast access to voxel states and geometry configurations.
  */
 export class VoxelChunk {
+    /**
+     * The dimension of the VoxelChunk: 4 voxels along each axis (4x4x4).
+     */
     public static readonly DIMS: number = 4;
+
+    /**
+     * The total number of voxels in the chunk (4x4x4 = 64 voxels).
+     */
     public static readonly SIZE: number = VoxelChunk.DIMS * VoxelChunk.DIMS * VoxelChunk.DIMS;
 
     /**
-     * Each Voxel has 4x4x4 BitVoxels hence we need to allocate 64 bits per voxel
-     * that stores the BitVoxel states
+     * Each voxel contains 64 BitVoxels (4x4x4), and the BitVoxel states are stored in a BVXLayer.
      */
     private readonly _layer: BVXLayer;
 
     /**
-     * The Key that used to know where in local-coordinates the current VoxelChunk
-     * resides in. The Key is used to find the Neighbouring chunks for queries.
+     * The MortonKey representing the location of this VoxelChunk in the voxel map.
+     * This key is used to identify the chunk and its neighbors for querying and updates.
      */
     private readonly _key: MortonKey;
 
+    /**
+     * Constructs a new VoxelChunk for the given location in the voxel map.
+     * 
+     * @param key - The MortonKey representing the location of this chunk.
+     */
     constructor(key: MortonKey) {
         this._layer = new BVXLayer();
         this._key = key;
     }
 
     /**
-     * Returns the Index Key for this VoxelChunk
+     * Returns the MortonKey that identifies this VoxelChunk's location in the voxel map.
      */
     public get key(): MortonKey {
         return this._key;
     }
 
     /**
-     * Counts the number of set BitVoxels contained in this VoxelChunk reference.
-     * This uses BitOps.popCount() operation which should compute the results very fast.
+     * Returns the number of set (ON) BitVoxels in this VoxelChunk.
+     * Uses a fast BitOps.popCount() to calculate the total.
      * 
-     * This is the same property as VoxelChunk.layer.length
+     * This property is equivalent to accessing `VoxelChunk.layer.length`.
      */
     public get length(): number {
         return this.layer.length;
     }
 
     /**
-     * Returns the backing BitVoxel layer for this Chunk
+     * Returns the BVXLayer that stores the BitVoxel states for this chunk.
      */
     public get layer(): BVXLayer {
         return this._layer;
     }
 
     /**
-     * Sets the meta-data for the provided Voxel Index
-     * @param key - The Voxel Index to set the meta-data
-     * @param meta - The meta-data to set
+     * Sets meta-data for a specific VoxelIndex in the chunk. This allows you to store
+     * additional information about a voxel (e.g., properties, flags).
+     * 
+     * @param key - The VoxelIndex identifying the voxel.
+     * @param meta - The meta-data to associate with the voxel.
      */
-    public setMetaData(key: VoxelIndex, meta: number): void { };
+    public setMetaData(key: VoxelIndex, meta: number): void { }
 
     /**
-     * Returns the encoded meta-data for the provided Voxel Index
-     * @param key - The Voxel Index
-     * @returns - The encoded meta-data
+     * Retrieves the meta-data for a specific VoxelIndex.
+     * 
+     * @param key - The VoxelIndex identifying the voxel.
+     * @returns - The meta-data associated with the voxel.
      */
-    public getMetaData(key: VoxelIndex): number { return 0; };
+    public getMetaData(key: VoxelIndex): number {
+        return 0;
+    }
 
     /**
-     * Sets the BitVoxel to the 1/ON state at provided position.
-     * This is the same property as VoxelChunk.layer.set
-     * @param key - The Voxel Index
+     * Sets the BitVoxel at the specified VoxelIndex to the ON (1) state.
+     * This is equivalent to calling `VoxelChunk.layer.set`.
+     * 
+     * @param key - The VoxelIndex identifying the BitVoxel to set.
      */
     public setBitVoxel(key: VoxelIndex): void {
         this.layer.set(key);
     }
 
     /**
-     * Fills the provided Voxel with enabled BitVoxels. This is much faster
-     * than individually filling a Voxel using a looped coordinate.
-     * This is the same property as VoxelChunk.layer.fill
-     * @param key - The Voxel Index
+     * Fills all BitVoxels in the specified voxel with the ON (1) state.
+     * This is more efficient than setting each BitVoxel individually.
+     * Equivalent to `VoxelChunk.layer.fill`.
+     * 
+     * @param key - The VoxelIndex identifying the voxel to fill.
      */
     public fillVoxel(key: VoxelIndex): void {
         this.layer.fill(key);
     }
 
     /**
-     * Empties the provided Voxel with disabled BitVoxels. This is
-     * much faster than individually emptying a Voxel using a looped coordinate.
-     * This is the same property as VoxelChunk.layer.empty
-     * @param key - The Voxel Index
+     * Empties all BitVoxels in the specified voxel by setting them to the OFF (0) state.
+     * This is more efficient than unsetting each BitVoxel individually.
+     * Equivalent to `VoxelChunk.layer.empty`.
+     * 
+     * @param key - The VoxelIndex identifying the voxel to empty.
      */
     public emptyVoxel(key: VoxelIndex): void {
         this.layer.empty(key);
     }
 
     /**
-     * Unsets the BitVoxel to the 0/OFF state at provided position.
-     * This is the same property as VoxelChunk.layer.unset
-     * @param key - The Voxel Index
+     * Unsets the BitVoxel at the specified VoxelIndex to the OFF (0) state.
+     * This is equivalent to calling `VoxelChunk.layer.unset`.
+     * 
+     * @param key - The VoxelIndex identifying the BitVoxel to unset.
      */
     public unsetBitVoxel(key: VoxelIndex): void {
         this.layer.unset(key);
     }
 
     /**
-     * Toggle the BitVoxel to the ON/OFF States based on previous state.
-     * This is the same property as VoxelChunk.layer.toggle
-     * @param key - The Voxel Index
+     * Toggles the state of the BitVoxel at the specified VoxelIndex (ON becomes OFF, and vice versa).
+     * This is equivalent to calling `VoxelChunk.layer.toggle`.
+     * 
+     * @param key - The VoxelIndex identifying the BitVoxel to toggle.
      */
     public toggleBitVoxel(key: VoxelIndex): void {
         this.layer.toggle(key);
     }
 
     /**
-     * Returns the current state of the requested BitVoxel.
-     * This is the same property as VoxelChunk.layer.get
-     * @param key - The Voxel Index
-     * @returns - 1 if ON or 0 if OFF
+     * Returns the current state of the BitVoxel at the specified VoxelIndex (1 if ON, 0 if OFF).
+     * This is equivalent to calling `VoxelChunk.layer.get`.
+     * 
+     * @param key - The VoxelIndex identifying the BitVoxel to query.
+     * @returns - 1 if the BitVoxel is ON, 0 if it is OFF.
      */
     public getBitVoxel(key: VoxelIndex): number {
         return this.layer.get(key);
     }
 
     /**
-     * Counts the number of SET BitVoxels for a particular Voxel.
-     * This is the same property as VoxelChunk.layer.count
-     * @param key - The Voxel key to use in local coordinates
-     * @returns number of SET BitVoxels between [0-64] inclusive
+     * Counts the number of set (ON) BitVoxels in the voxel identified by the specified VoxelIndex.
+     * This is equivalent to calling `VoxelChunk.layer.count`.
+     * 
+     * @param key - The VoxelIndex identifying the voxel to query.
+     * @returns - The number of set BitVoxels in the voxel (between 0 and 64).
      */
     public getBitVoxelCount(key: VoxelIndex): number {
         return this.layer.count(key);
     }
 
     /**
-     * Check to see if VoxelChunk instances match by comparing the keys
-     * @param other - the VoxelChunk to compare with
-     * @returns - True if match, false otherwise
+     * Compares this VoxelChunk with another VoxelChunk to determine if they are the same,
+     * based on their MortonKeys.
+     * 
+     * @param other - The other VoxelChunk to compare with.
+     * @returns - True if the chunks have the same key, false otherwise.
      */
     public cmp(other: VoxelChunk | null): boolean {
         return other !== null ? this._key.cmp(other._key) : false;

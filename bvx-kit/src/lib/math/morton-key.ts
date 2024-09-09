@@ -2,36 +2,38 @@ import { BitOps } from "../util/bit-ops.js";
 import { Key } from "./key.js";
 
 /**
- * Implementation for 32 bit 3D MortonKey (Z-order curve) keys.
+ * Implementation of a 32-bit 3D MortonKey (Z-order curve) for compact 3D spatial keys.
  * 
- * 32 Bit keys allows encoding 2^10 or 0-1023 values per axis. 
- * Max values per axis becomes (including)
+ * MortonKeys map 3D coordinates into a 1D space-filling curve using bitwise interleaving.
+ * Each axis (x, y, z) can encode values from 0 to 1023 (2^10), resulting in a 
+ * 30-bit key representation. Morton keys provide good spatial locality, which makes
+ * them useful in hash-maps and for organizing spatial data.
  * 
- * x - min 0, max 1023
- * y - min 0, max 1023
- * z - min 0, max 1023
+ * Max values per axis:
  * 
- * Values exceeding these tolerances will wrap around, for example
- * 1024 becomes 0
- * 1025 becomes 1
+ * - x: min 0, max 1023
+ * - y: min 0, max 1023
+ * - z: min 0, max 1023
  * 
- * Negative values will also wrap around, for example
- * -1 becomes 1023
- * -2 becomes 1022
+ * Values exceeding these limits will wrap around:
+ * - 1024 becomes 0, 1025 becomes 1
+ * - -1 becomes 1023, -2 becomes 1022
  * 
- * See: https://en.wikipedia.org/wiki/Z-order_curve
+ * MortonKeys are generally slower to operate on than LinearKeys but provide
+ * better spatial data distribution when used as hash keys, especially useful for 
+ * server-side data lookups.
  * 
- * MortonKeys are slower to operate than LinearKeys however they provide
- * a much better data-distribution when used as a hash-key for inserting items
- * randomly into a dictionary or hash-map. This can be important for Server-side
- * data lookups.
+ * For more information: https://en.wikipedia.org/wiki/Z-order_curve
  */
 export class MortonKey implements Key {
     /**
-     * Each component (x, y, z) can hold 10 bits of data for a total of 30 bits
+     * Each axis (x, y, z) can store up to 10 bits, creating a 30-bit Morton key.
      */
     private static readonly KEY_MASK: number = BitOps.maskForBits(10);
 
+    /**
+     * Bitmasks used for interleaving the bits of the x, y, and z coordinates in the Morton encoding.
+     */
     private static readonly X3_MASK: number = 0x9249249;
     private static readonly Y3_MASK: number = 0x12492492;
     private static readonly Z3_MASK: number = 0x24924924;
@@ -46,6 +48,15 @@ export class MortonKey implements Key {
         this._key = key | 0;
     }
 
+    /**
+     * Encodes the given 3D coordinates (x, y, z) into a 32-bit Morton key.
+     * 
+     * @param x - The x-coordinate (0-1023).
+     * @param y - The y-coordinate (0-1023).
+     * @param z - The z-coordinate (0-1023).
+     * @param optres - Optional MortonKey to reuse, reducing memory allocations.
+     * @returns - The new or modified MortonKey.
+     */
     public static from(x: number, y: number, z: number, optres: MortonKey | null = null): MortonKey {
         optres = optres || new MortonKey();
 
@@ -60,6 +71,12 @@ export class MortonKey implements Key {
         return optres;
     }
 
+    /**
+     * Encodes a single coordinate value into its interleaved form for Morton encoding.
+     * 
+     * @param n - The 10-bit value to encode.
+     * @returns - The interleaved value for Morton encoding.
+     */
     private static _EncodePart(n: number): number {
         const n0: number = (n | 0) & 0x000003ff;
 
@@ -71,6 +88,12 @@ export class MortonKey implements Key {
         return n4;
     }
 
+    /**
+     * Decodes an interleaved value back into its original 10-bit coordinate.
+     * 
+     * @param n - The interleaved value to decode.
+     * @returns - The original 10-bit value.
+     */
     private static _DecodePart(n: number): number {
         const n0: number = (n | 0) & 0x09249249;
 
@@ -82,6 +105,14 @@ export class MortonKey implements Key {
         return n4;
     }
 
+    /**
+     * Adds two MortonKeys together by adding their encoded components (x, y, z).
+     * 
+     * @param a - The first MortonKey.
+     * @param b - The second MortonKey.
+     * @param optres - Optional MortonKey to store the result, reducing allocations.
+     * @returns - The new or modified MortonKey representing the sum.
+     */
     public static add(a: MortonKey, b: MortonKey, optres: MortonKey | null = null): MortonKey {
         optres = optres || new MortonKey();
 
@@ -94,6 +125,14 @@ export class MortonKey implements Key {
         return optres;
     }
 
+    /**
+     * Subtracts one MortonKey from another by subtracting their encoded components (x, y, z).
+     * 
+     * @param a - The first MortonKey.
+     * @param b - The second MortonKey.
+     * @param optres - Optional MortonKey to store the result, reducing allocations.
+     * @returns - The new or modified MortonKey representing the difference.
+     */
     public static sub(a: MortonKey, b: MortonKey, optres: MortonKey | null = null): MortonKey {
         optres = optres || new MortonKey();
 
@@ -106,6 +145,7 @@ export class MortonKey implements Key {
         return optres;
     }
 
+    // Increment and decrement operations for individual axes
     public static incX(a: MortonKey, optres: MortonKey | null = null): MortonKey {
         optres = optres || new MortonKey();
 
@@ -166,22 +206,29 @@ export class MortonKey implements Key {
         return optres;
     }
 
+    /**
+     * Adds another MortonKey to the current instance.
+     * 
+     * @param other - The other MortonKey to add.
+     * @param optres - Optional MortonKey to store the result.
+     * @returns - The modified MortonKey with the updated value.
+     */
     public add(other: MortonKey, optres: MortonKey | null = null): MortonKey {
-        optres = optres || this;
-
-        MortonKey.add(this, other, optres);
-
-        return optres;
+        return MortonKey.add(this, other, optres || this);
     }
 
+    /**
+     * Subtracts another MortonKey from the current instance.
+     * 
+     * @param other - The other MortonKey to subtract.
+     * @param optres - Optional MortonKey to store the result.
+     * @returns - The modified MortonKey with the updated value.
+     */
     public sub(other: MortonKey, optres: MortonKey | null = null): MortonKey {
-        optres = optres || this;
-
-        MortonKey.sub(this, other, optres);
-
-        return optres;
+        return MortonKey.sub(this, other, optres || this);
     }
 
+    // Accessor and mutator methods for x, y, z coordinates
     public get key(): number {
         return this._key;
     }
@@ -210,6 +257,7 @@ export class MortonKey implements Key {
         MortonKey.from(this.x, this.y, value, this);
     }
 
+    // Increment and decrement methods for the current key's coordinates
     public incX(optres: MortonKey | null = null): MortonKey {
         return MortonKey.incX(this, optres || this);
     }
@@ -234,18 +282,33 @@ export class MortonKey implements Key {
         return MortonKey.decZ(this, optres || this);
     }
 
+    /**
+     * Copies the current MortonKey into a new or existing MortonKey.
+     * 
+     * @param optres - Optional MortonKey to store the result.
+     * @returns - A copy of the current MortonKey.
+     */
     public copy(optres: MortonKey | null = null): MortonKey {
         optres = optres || new MortonKey();
-
         optres._key = this._key;
-
         return optres;
     }
 
+    /**
+     * Clones the current MortonKey into a new MortonKey instance.
+     * 
+     * @returns - A new MortonKey that is a clone of the current one.
+     */
     public clone(): MortonKey {
         return new MortonKey(this._key);
     }
 
+    /**
+     * Compares the current MortonKey with another Key.
+     * 
+     * @param other - The Key to compare with.
+     * @returns - True if the two keys are equal, false otherwise.
+     */
     public cmp(other: Key): boolean {
         if (other instanceof MortonKey) {
             return this._key === other.key;
@@ -254,8 +317,12 @@ export class MortonKey implements Key {
         return this.x === other.x && this.y === other.y && this.z === other.z;
     }
 
-    /* istanbul ignore next */
+    /**
+     * Converts the MortonKey to a human-readable string representation.
+     * 
+     * @returns - A string representation of the key and its x, y, z values.
+     */
     toString(): string {
-        return "MortonKey - key:" + this.key + " x:" + this.x + " y:" + this.y + " z:" + this.z;
+        return `MortonKey { key: ${this.key}, x: ${this.x}, y: ${this.y}, z: ${this.z} }`;
     }
 }
