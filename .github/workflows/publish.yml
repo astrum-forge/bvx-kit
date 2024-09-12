@@ -39,6 +39,8 @@ jobs:
         run: rm -rf bvx-kit/src/version.ts && echo 'export default "${{ env.RELEASE_VERSION }}";' > bvx-kit/src/version.ts
       - name: copy README
         run: cp README.md bvx-kit/README.md
+      - name: copy LICENSE
+        run: cp LICENSE.md bvx-kit/LICENSE.md
       - name: copy graphics
         run: cp -R graphics bvx-kit/
       - name: NPM Login & Build

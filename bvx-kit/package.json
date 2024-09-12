@@ -29,8 +29,8 @@
     "voxel",
     "bitvoxel"
   ],
-  "author": "Astrum Forge Studios",
-  "license": "MIT",
+  "author": "David Arayan <david@astrumforge.com> (https://www.astrumforge.com)",
+  "license": "SEE LICENSE IN LICENSE.md",
   "bugs": {
     "url": "https://github.com/astrum-forge/bvx-kit/issues"
   },
@@ -40,7 +40,7 @@
     "jest": "^29.7.0",
     "ts-jest": "^29.2.5",
     "ts-node": "^10.9.2",
-    "typescript": "^5.5.4"
+    "typescript": "^5.6.2"
   },
   "publishConfig": {
     "access": "public"
