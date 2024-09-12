@@ -2,7 +2,7 @@
   <img src="graphics/icon_2.png?raw=true" alt="Astrum Forge Studios Logo" width="400">
 </h3>
 
-[![License](https://img.shields.io/badge/license-MIT-orange.svg?style=flat)](LICENSE)
+![License: Prosperity Public License](https://img.shields.io/badge/license-Prosperity%20Public%20License-blue)
 
 # BitVoxel Engine
 
@@ -30,7 +30,6 @@ The **BitVoxel Engine** features a highly optimized architecture focused on memo
 - **Flexible Meta-Data Layer**: Choose different bit sizes for meta-data storage based on project needs, optimizing either for memory or detail.
 - **TypeScript-Based**: Written in TypeScript, providing type safety and better developer tooling.
 - **Unit-Tested**: The code is 100% unit-tested to ensure stability and reliability.
-- **MIT Licensed**: Released under the permissive [MIT License](LICENSE), allowing free use, modification, and distribution.
 
 ## Geometry Lookup Table
 
