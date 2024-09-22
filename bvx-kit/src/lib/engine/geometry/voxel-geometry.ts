@@ -78,12 +78,12 @@ export abstract class VoxelGeometry {
      * @returns - The number of set bits in the geometry indices.
      */
     public popCount(): number {
-        let counter: number = 0;
+        let counter = 0;
 
         const arr: Uint8Array = this._geometryIndices;
         const length: number = arr.length;
 
-        for (let i: number = 0; i < length; i++) {
+        for (let i = 0; i < length; i++) {
             counter += BitOps.popCount(arr[i]); // Uses BitOps to count the number of set bits
         }
 

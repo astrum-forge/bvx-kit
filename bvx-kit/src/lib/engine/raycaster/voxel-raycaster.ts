@@ -38,7 +38,7 @@ export class VoxelRaycaster {
      * @returns - Returns the WorldIndex of the first voxel hit by the ray if a voxel is found, otherwise returns null.
      */
     public raycast(ray: VoxelRay, optres: WorldIndex | null = null): WorldIndex | null {
-        const cellSize: number = 1; // Each voxel is treated as a 1x1x1 cell
+        const cellSize = 1; // Each voxel is treated as a 1x1x1 cell
 
         // Start and end coordinates of the ray in voxel space
         const x1: number = ray.startX;

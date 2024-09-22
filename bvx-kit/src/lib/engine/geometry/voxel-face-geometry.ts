@@ -96,7 +96,7 @@ export class VoxelFaceGeometry extends VoxelGeometry {
         // Loop through all BitVoxels in the chunk (16x16x16 = 4096 BitVoxels).
         const length: number = this.length;
 
-        for (let index: number = 0; index < length; index++) {
+        for (let index = 0; index < length; index++) {
             vic.key = index;
 
             const bvState: number = center.getBitVoxel(vic);

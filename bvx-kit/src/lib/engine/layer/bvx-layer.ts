@@ -46,7 +46,7 @@ export class BVXLayer {
      */
     public fill(key: VoxelIndex): void {
         const vxIndex: number = key.vKey * 2; // Each Voxel occupies 2 32-bit integers.
-        const allFullBits: number = 0xFFFFFFFF; // Set all 32 bits to 1 (filled).
+        const allFullBits = 0xFFFFFFFF; // Set all 32 bits to 1 (filled).
 
         const elements: Uint32Array = this._bitVoxels.elements;
         elements[vxIndex] = allFullBits;
@@ -61,7 +61,7 @@ export class BVXLayer {
      */
     public empty(key: VoxelIndex): void {
         const vxIndex: number = key.vKey * 2; // Each Voxel occupies 2 32-bit integers.
-        const allEmptyBits: number = 0x00000000; // Set all 32 bits to 0 (empty).
+        const allEmptyBits = 0x00000000; // Set all 32 bits to 0 (empty).
 
         const elements: Uint32Array = this._bitVoxels.elements;
         elements[vxIndex] = allEmptyBits;

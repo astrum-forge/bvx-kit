@@ -39,7 +39,7 @@ export class HashGrid<K extends Key, V> {
     /**
      * The internal dictionary (an array of arrays) storing buckets of Node objects.
      */
-    private readonly _dict: Array<Array<Node<V>>>;
+    private readonly _dict: Array<Node<V>>[];
 
     /**
      * The number of hash buckets in the grid.
@@ -54,7 +54,7 @@ export class HashGrid<K extends Key, V> {
     constructor(buckets: number = HashGrid.DEFAULT_SIZE) {
         // Ensure the size is greater than 0, or use the default size
         this._size = buckets > 0 ? buckets : HashGrid.DEFAULT_SIZE;
-        this._dict = new Array<Array<Node<V>>>(this._size);
+        this._dict = new Array<Node<V>[]>(this._size);
     }
 
     /**
@@ -70,8 +70,8 @@ export class HashGrid<K extends Key, V> {
      * @param key - The key used to determine the bucket.
      * @returns - The array of Node objects in the bucket, or null if the bucket is empty.
      */
-    private _GetKeyBucket(key: K): Array<Node<V>> | null {
-        const value: Array<Node<V>> | null | undefined = this._dict[key.key % this._size];
+    private _GetKeyBucket(key: K): Node<V>[] | null {
+        const value: Node<V>[] | null | undefined = this._dict[key.key % this._size];
         return value ? value : null;
     }
 
@@ -83,7 +83,7 @@ export class HashGrid<K extends Key, V> {
      * @returns - The Node reference if found, or null if not found.
      */
     private _Get(key: K): Node<V> | null {
-        const bucket: Array<Node<V>> | null = this._GetKeyBucket(key);
+        const bucket: Node<V>[] | null = this._GetKeyBucket(key);
 
         if (bucket !== null) {
             // NOTE: This is a linear O(n) search. Optimization to O(log(n)) can be done by sorting.
@@ -132,7 +132,7 @@ export class HashGrid<K extends Key, V> {
         // Insert a new key-value pair if the key doesn't exist
         if (node === null) {
             const bucketKey: number = key.key % this._size;
-            const bucket: Array<Node<V>> | undefined | null = this._dict[bucketKey];
+            const bucket: Node<V>[] | undefined | null = this._dict[bucketKey];
 
             // Append to the bucket if it exists
             if (bucket) {
@@ -159,7 +159,7 @@ export class HashGrid<K extends Key, V> {
         const node: Node<V> | null = this._Get(key);
 
         if (node !== null) {
-            const bucket: Array<Node<V>> = this._GetKeyBucket(key) as Array<Node<V>>;
+            const bucket: Node<V>[] = this._GetKeyBucket(key) as Array<Node<V>>;
             const index: number = bucket.indexOf(node);
 
             // Remove the node from the bucket

@@ -44,7 +44,7 @@ export class VoxelRay {
      * 
      * @returns - The current instance of VoxelRay with the new start and end points set.
      */
-    public set(sx: number, sy: number, sz: number, ex: number, ey: number, ez: number): VoxelRay {
+    public set(sx: number, sy: number, sz: number, ex: number, ey: number, ez: number): this {
         // Sets the starting coordinates of the ray
         this._startX = sx;
         this._startY = sy;

@@ -105,7 +105,7 @@ export class BitOps {
      */
     public static toBitString(value: number): string {
         let str = "";
-        for (let i: number = 31; i >= 0; i--) {
+        for (let i = 31; i >= 0; i--) {
             str += BitOps.bitAt(value, i);
         }
         return str;
@@ -118,9 +118,9 @@ export class BitOps {
      * @param readIndex - Optional starting index to begin reading from (defaults to 0).
      * @returns - The decoded 32-bit integer.
      */
-    public static fromBitString(data: string, readIndex: number = 0): number {
-        let value: number = 0;
-        for (let i: number = readIndex, j: number = 31; i < 32; i++, j--) {
+    public static fromBitString(data: string, readIndex = 0): number {
+        let value = 0;
+        for (let i: number = readIndex, j = 31; i < 32; i++, j--) {
             const dval: string = data[i];
             value = dval === "1" ? BitOps.setBitAt(value, j) : BitOps.unsetBitAt(value, j);
         }

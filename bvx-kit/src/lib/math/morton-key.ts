@@ -42,9 +42,9 @@ export class MortonKey implements Key {
     private static readonly XZ3_MASK: number = MortonKey.X3_MASK | MortonKey.Z3_MASK;
     private static readonly YZ3_MASK: number = MortonKey.Y3_MASK | MortonKey.Z3_MASK;
 
-    private _key: number = 0;
+    private _key = 0;
 
-    constructor(key: number = 0) {
+    constructor(key = 0) {
         this._key = key | 0;
     }
 
@@ -58,7 +58,7 @@ export class MortonKey implements Key {
      * @returns - The new or modified MortonKey.
      */
     public static from(x: number, y: number, z: number, optres: MortonKey | null = null): MortonKey {
-        optres = optres || new MortonKey();
+        optres = optres ?? new MortonKey();
 
         const mask: number = MortonKey.KEY_MASK;
 
@@ -214,7 +214,7 @@ export class MortonKey implements Key {
      * @returns - The modified MortonKey with the updated value.
      */
     public add(other: MortonKey, optres: MortonKey | null = null): MortonKey {
-        return MortonKey.add(this, other, optres || this);
+        return MortonKey.add(this, other, optres ?? this);
     }
 
     /**
@@ -225,7 +225,7 @@ export class MortonKey implements Key {
      * @returns - The modified MortonKey with the updated value.
      */
     public sub(other: MortonKey, optres: MortonKey | null = null): MortonKey {
-        return MortonKey.sub(this, other, optres || this);
+        return MortonKey.sub(this, other, optres ?? this);
     }
 
     // Accessor and mutator methods for x, y, z coordinates
@@ -259,27 +259,27 @@ export class MortonKey implements Key {
 
     // Increment and decrement methods for the current key's coordinates
     public incX(optres: MortonKey | null = null): MortonKey {
-        return MortonKey.incX(this, optres || this);
+        return MortonKey.incX(this, optres ?? this);
     }
 
     public incY(optres: MortonKey | null = null): MortonKey {
-        return MortonKey.incY(this, optres || this);
+        return MortonKey.incY(this, optres ?? this);
     }
 
     public incZ(optres: MortonKey | null = null): MortonKey {
-        return MortonKey.incZ(this, optres || this);
+        return MortonKey.incZ(this, optres ?? this);
     }
 
     public decX(optres: MortonKey | null = null): MortonKey {
-        return MortonKey.decX(this, optres || this);
+        return MortonKey.decX(this, optres ?? this);
     }
 
     public decY(optres: MortonKey | null = null): MortonKey {
-        return MortonKey.decY(this, optres || this);
+        return MortonKey.decY(this, optres ?? this);
     }
 
     public decZ(optres: MortonKey | null = null): MortonKey {
-        return MortonKey.decZ(this, optres || this);
+        return MortonKey.decZ(this, optres ?? this);
     }
 
     /**

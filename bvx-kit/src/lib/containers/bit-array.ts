@@ -27,8 +27,7 @@ export class BitArray {
      * 
      * @param elements - The number of 32-bit elements to allocate. Defaults to 1.
      */
-    constructor(elements: number = 1) {
-        // Allocate 4 bytes per element (since each Uint32 element is 4 bytes)
+    constructor(elements = 1) {        // Allocate 4 bytes per element (since each Uint32 element is 4 bytes)
         this._buffer = new ArrayBuffer(elements > 0 ? elements * 4 : 4);
         this._array = new Uint32Array(this._buffer);
     }

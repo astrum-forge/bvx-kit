@@ -36,7 +36,7 @@ export class WorldIndex {
      * @returns - A WorldIndex object containing the chunk and voxel indices for the given world coordinates.
      */
     public static from(worldX: number, worldY: number, worldZ: number, optres: WorldIndex | null = null): WorldIndex {
-        optres = optres || new WorldIndex();
+        optres = optres ?? new WorldIndex();
 
         const chunkSize: number = VoxelChunk.DIMS; // Size of a chunk in one dimension
         const worldSize: number = chunkSize * chunkSize; // Represents chunk volume in world space

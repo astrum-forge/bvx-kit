@@ -20,9 +20,9 @@ export class LinearKey implements Key {
      */
     private static readonly KEY_MASK: number = BitOps.maskForBits(10);
 
-    private _key: number = 0;
+    private _key = 0;
 
-    constructor(key: number = 0) {
+    constructor(key = 0) {
         this._key = key | 0;
     }
 
@@ -37,7 +37,7 @@ export class LinearKey implements Key {
      * @returns - The new or modified LinearKey.
      */
     public static from(x: number, y: number, z: number, optres: LinearKey | null = null): LinearKey {
-        optres = optres || new LinearKey();
+        optres = optres ?? new LinearKey();
         optres._key = LinearKey._Encode(x, y, z);
 
         return optres;
@@ -99,27 +99,27 @@ export class LinearKey implements Key {
 
     // Increment and decrement operations for individual axes
     public static incX(a: LinearKey, optres: LinearKey | null = null): LinearKey {
-        return LinearKey.from(a.x + 1, a.y, a.z, optres || new LinearKey());
+        return LinearKey.from(a.x + 1, a.y, a.z, optres ?? new LinearKey());
     }
 
     public static decX(a: LinearKey, optres: LinearKey | null = null): LinearKey {
-        return LinearKey.from(a.x - 1, a.y, a.z, optres || new LinearKey());
+        return LinearKey.from(a.x - 1, a.y, a.z, optres ?? new LinearKey());
     }
 
     public static incY(a: LinearKey, optres: LinearKey | null = null): LinearKey {
-        return LinearKey.from(a.x, a.y + 1, a.z, optres || new LinearKey());
+        return LinearKey.from(a.x, a.y + 1, a.z, optres ?? new LinearKey());
     }
 
     public static decY(a: LinearKey, optres: LinearKey | null = null): LinearKey {
-        return LinearKey.from(a.x, a.y - 1, a.z, optres || new LinearKey());
+        return LinearKey.from(a.x, a.y - 1, a.z, optres ?? new LinearKey());
     }
 
     public static incZ(a: LinearKey, optres: LinearKey | null = null): LinearKey {
-        return LinearKey.from(a.x, a.y, a.z + 1, optres || new LinearKey());
+        return LinearKey.from(a.x, a.y, a.z + 1, optres ?? new LinearKey());
     }
 
     public static decZ(a: LinearKey, optres: LinearKey | null = null): LinearKey {
-        return LinearKey.from(a.x, a.y, a.z - 1, optres || new LinearKey());
+        return LinearKey.from(a.x, a.y, a.z - 1, optres ?? new LinearKey());
     }
 
     /**
@@ -130,7 +130,7 @@ export class LinearKey implements Key {
      * @returns - The modified LinearKey with the new values.
      */
     public add(other: LinearKey, optres: LinearKey | null = null): LinearKey {
-        return LinearKey.add(this, other, optres || this);
+        return LinearKey.add(this, other, optres ?? this);
     }
 
     /**
@@ -141,7 +141,7 @@ export class LinearKey implements Key {
      * @returns - The modified LinearKey with the new values.
      */
     public sub(other: LinearKey, optres: LinearKey | null = null): LinearKey {
-        return LinearKey.sub(this, other, optres || this);
+        return LinearKey.sub(this, other, optres ?? this);
     }
 
     // Accessor and mutator methods for x, y, z coordinates
@@ -176,27 +176,27 @@ export class LinearKey implements Key {
 
     // Increment and decrement methods for the current key's coordinates
     public incX(optres: LinearKey | null = null): LinearKey {
-        return LinearKey.incX(this, optres || this);
+        return LinearKey.incX(this, optres ?? this);
     }
 
     public incY(optres: LinearKey | null = null): LinearKey {
-        return LinearKey.incY(this, optres || this);
+        return LinearKey.incY(this, optres ?? this);
     }
 
     public incZ(optres: LinearKey | null = null): LinearKey {
-        return LinearKey.incZ(this, optres || this);
+        return LinearKey.incZ(this, optres ?? this);
     }
 
     public decX(optres: LinearKey | null = null): LinearKey {
-        return LinearKey.decX(this, optres || this);
+        return LinearKey.decX(this, optres ?? this);
     }
 
     public decY(optres: LinearKey | null = null): LinearKey {
-        return LinearKey.decY(this, optres || this);
+        return LinearKey.decY(this, optres ?? this);
     }
 
     public decZ(optres: LinearKey | null = null): LinearKey {
-        return LinearKey.decZ(this, optres || this);
+        return LinearKey.decZ(this, optres ?? this);
     }
 
     /**

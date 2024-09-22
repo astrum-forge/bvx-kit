@@ -19,9 +19,9 @@ export class VoxelIndex implements Key {
     private static readonly VX_MASK: number = BitOps.maskForBits(6);  // For Voxel keys (x, y, z)
     private static readonly VALUE_MASK: number = BitOps.maskForBits(12); // For full 12-bit key
 
-    private _key: number = 0;
+    private _key = 0;
 
-    constructor(key: number = 0) {
+    constructor(key = 0) {
         this._key = key | 0;
     }
 
@@ -37,8 +37,8 @@ export class VoxelIndex implements Key {
      * @param optres - Optional VoxelIndex to reuse for encoding, minimizing allocations.
      * @returns - A new or modified VoxelIndex containing the encoded values.
      */
-    public static from(x: number, y: number, z: number, u: number = 0, v: number = 0, w: number = 0, optres: VoxelIndex | null = null): VoxelIndex {
-        optres = optres || new VoxelIndex();
+    public static from(x: number, y: number, z: number, u = 0, v: number = 0, w: number = 0, optres: VoxelIndex | null = null): VoxelIndex {
+        optres = optres ?? new VoxelIndex();
 
         optres._key = VoxelIndex._Encode(x, y, z, u, v, w);
 

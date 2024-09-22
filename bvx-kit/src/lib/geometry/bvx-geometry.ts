@@ -67,10 +67,10 @@ export class BVXGeometry {
      * 
      * NOTE: The generated indices are used in conjunction with the vertex and normal arrays for rendering.
      */
-    public static getIndices(geometry: VoxelFaceGeometry, flipped: boolean = false, optres: Uint32Array | null = null): Uint32Array {
+    public static getIndices(geometry: VoxelFaceGeometry, flipped = false, optres: Uint32Array | null = null): Uint32Array {
         const numberOfFaces: number = geometry.popCount();
         const numberOfIndices: number = numberOfFaces * 6; // 6 indices per face (2 triangles per face)
-        const result = optres || new Uint32Array(numberOfIndices);
+        const result = optres ?? new Uint32Array(numberOfIndices);
 
         // Ensure the provided result buffer has the correct length
         if (result.length !== numberOfIndices) {
@@ -79,11 +79,11 @@ export class BVXGeometry {
 
         const geometryIndices: Uint8Array = geometry.indices;
         const length: number = geometryIndices.length;
-        const renderableIndices: Array<Uint32Array> = flipped ? indicesFlipped : indices;
+        const renderableIndices: Uint32Array[] = flipped ? indicesFlipped : indices;
 
         let counter = 0;
 
-        for (let index: number = 0; index < length; index++) {
+        for (let index = 0; index < length; index++) {
             const gi: number = geometryIndices[index];
 
             // Skip if the voxel face is not active (0 means no voxel face)
@@ -96,7 +96,7 @@ export class BVXGeometry {
             const clength: number = configuration.length;
 
             // Offset the indices by the voxel's position and add to the result array
-            for (let cindex: number = 0; cindex < clength; cindex++) {
+            for (let cindex = 0; cindex < clength; cindex++) {
                 result[counter] = configuration[cindex] + (index * 24);
                 counter++;
             }
