@@ -70,7 +70,7 @@ export class LinearKey implements Key {
      * @returns - A new or modified LinearKey with the added values.
      */
     public static add(a: LinearKey, b: LinearKey, optres: LinearKey | null = null): LinearKey {
-        optres = optres || new LinearKey();
+        optres = optres ?? new LinearKey();
         const sumX: number = a.x + b.x;
         const sumY: number = a.y + b.y;
         const sumZ: number = a.z + b.z;

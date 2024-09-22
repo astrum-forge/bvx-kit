@@ -114,7 +114,7 @@ export class MortonKey implements Key {
      * @returns - The new or modified MortonKey representing the sum.
      */
     public static add(a: MortonKey, b: MortonKey, optres: MortonKey | null = null): MortonKey {
-        optres = optres || new MortonKey();
+        optres = optres ?? new MortonKey();
 
         const sumX: number = (a._key | MortonKey.YZ3_MASK) + (b._key & MortonKey.X3_MASK);
         const sumY: number = (a._key | MortonKey.XZ3_MASK) + (b._key & MortonKey.Y3_MASK);

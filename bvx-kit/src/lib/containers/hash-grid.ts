@@ -39,7 +39,7 @@ export class HashGrid<K extends Key, V> {
     /**
      * The internal dictionary (an array of arrays) storing buckets of Node objects.
      */
-    private readonly _dict: Array<Node<V>>[];
+    private readonly _dict: Node<V>[][];
 
     /**
      * The number of hash buckets in the grid.
@@ -159,7 +159,7 @@ export class HashGrid<K extends Key, V> {
         const node: Node<V> | null = this._Get(key);
 
         if (node !== null) {
-            const bucket: Node<V>[] = this._GetKeyBucket(key) as Array<Node<V>>;
+            const bucket: Node<V>[] = this._GetKeyBucket(key) as Node<V>[];
             const index: number = bucket.indexOf(node);
 
             // Remove the node from the bucket

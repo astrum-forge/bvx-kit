@@ -37,7 +37,7 @@ export class VoxelIndex implements Key {
      * @param optres - Optional VoxelIndex to reuse for encoding, minimizing allocations.
      * @returns - A new or modified VoxelIndex containing the encoded values.
      */
-    public static from(x: number, y: number, z: number, u = 0, v: number = 0, w: number = 0, optres: VoxelIndex | null = null): VoxelIndex {
+    public static from(x: number, y: number, z: number, u = 0, v = 0, w: number = 0, optres: VoxelIndex | null = null): VoxelIndex {
         optres = optres ?? new VoxelIndex();
 
         optres._key = VoxelIndex._Encode(x, y, z, u, v, w);
@@ -194,8 +194,7 @@ export class VoxelIndex implements Key {
      * @returns - A new or modified VoxelIndex containing the copied values.
      */
     public copy(optres: VoxelIndex | null = null): VoxelIndex {
-        optres = optres || new VoxelIndex();
-        optres._key = this._key;
+        optres = optres ?? new VoxelIndex();        optres._key = this._key;
         return optres;
     }
 
