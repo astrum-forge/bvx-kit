@@ -5,6 +5,6 @@ coverage/
 tsconfig.json
 package-lock.json
 jest.config.ts
-.eslintrc.json
+eslint.config.js
 codacy.yml
 .npmrc

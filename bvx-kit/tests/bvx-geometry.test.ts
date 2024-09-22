@@ -4,7 +4,6 @@ import { VoxelIndex } from "../src/lib/engine/voxel-index.js";
 import { MortonKey } from "../src/lib/math/morton-key.js";
 import { VoxelFaceGeometry } from "../src/lib/engine/geometry/voxel-face-geometry.js";
 import { VoxelWorld } from "../src/lib/engine/voxel-world.js";
-import { BitOps } from "../src/lib/util/bit-ops.js";
 import { BVXGeometry } from "../src/lib/geometry/bvx-geometry.js";
 import vertices from "../src/lib/geometry/lut/bvx-vertices.js";
 import normals from "../src/lib/geometry/lut/bvx-normals.js";
