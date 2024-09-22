@@ -15,7 +15,8 @@
     "dev:build-run": "rm -rf out && npm run build-ts && node out/index.js",
     "test:run": "jest",
     "test:coverage": "rm -rf coverage && jest --clearCache && jest --coverage --runInBand --collectCoverageFrom='src/lib/**/*.{ts,tsx}'",
-    "test:ci": "jest --ci --runInBand --coverage --collectCoverageFrom='src/lib/**/*.{ts,tsx}'"
+    "test:ci": "jest --ci --runInBand --coverage --collectCoverageFrom='src/lib/**/*.{ts,tsx}'",
+    "lint": "npx eslint ."
   },
   "repository": {
     "type": "git",
@@ -36,11 +37,18 @@
   },
   "homepage": "https://github.com/astrum-forge/bvx-kit",
   "devDependencies": {
+    "@eslint/js": "^9.11.0",
+    "@types/eslint__js": "^8.42.3",
     "@types/jest": "^29.5.13",
+    "@typescript-eslint/eslint-plugin": "^8.6.0",
+    "@typescript-eslint/parser": "^8.6.0",
+    "eslint": "^9.11.0",
+    "globals": "^15.9.0",
     "jest": "^29.7.0",
     "ts-jest": "^29.2.5",
     "ts-node": "^10.9.2",
-    "typescript": "^5.6.2"
+    "typescript": "^5.6.2",
+    "typescript-eslint": "^8.6.0"
   },
   "publishConfig": {
     "access": "public"

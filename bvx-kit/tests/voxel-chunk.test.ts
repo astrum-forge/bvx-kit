@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import { VoxelChunk } from "../src/lib/engine/chunks/voxel-chunk.js";
+import { VoxelChunk0 } from "../src/lib/engine/chunks/voxel-chunk-0.js";
 import { VoxelChunk8 } from "../src/lib/engine/chunks/voxel-chunk-8.js";
 import { VoxelChunk16 } from "../src/lib/engine/chunks/voxel-chunk-16.js";
 import { VoxelChunk32 } from "../src/lib/engine/chunks/voxel-chunk-32.js";
@@ -119,7 +120,7 @@ describe('VoxelChunk', () => {
     });
 
     it('.setMetaData() .getMetaData() - ensure 0 bit meta-data can be set and returned correctly', () => {
-        const chunk = new VoxelChunk(MortonKey.from(0, 0, 0));
+        const chunk = new VoxelChunk0(MortonKey.from(0, 0, 0));
 
         let metacount: number = 0;
 

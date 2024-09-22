@@ -10,7 +10,7 @@ import { VoxelIndex } from "../voxel-index.js";
  * for server-side or local storage use. It supports efficient manipulation of BitVoxels and 
  * provides fast access to voxel states and geometry configurations.
  */
-export class VoxelChunk {
+export abstract class VoxelChunk {
     /**
      * The dimension of the VoxelChunk: 4 voxels along each axis (4x4x4).
      */
@@ -73,7 +73,7 @@ export class VoxelChunk {
      * @param key - The VoxelIndex identifying the voxel.
      * @param meta - The meta-data to associate with the voxel.
      */
-    public setMetaData(key: VoxelIndex, meta: number): void { }
+    public abstract setMetaData(key: VoxelIndex, meta: number): void;
 
     /**
      * Retrieves the meta-data for a specific VoxelIndex.
@@ -81,9 +81,7 @@ export class VoxelChunk {
      * @param key - The VoxelIndex identifying the voxel.
      * @returns - The meta-data associated with the voxel.
      */
-    public getMetaData(key: VoxelIndex): number {
-        return 0;
-    }
+    public abstract getMetaData(key: VoxelIndex): number;
 
     /**
      * Sets the BitVoxel at the specified VoxelIndex to the ON (1) state.
