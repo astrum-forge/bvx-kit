@@ -1,4 +1,3 @@
-import { MortonKey } from "../../math/morton-key.js";
 import { VoxelIndex } from "../voxel-index.js";
 import { VoxelChunk } from "./voxel-chunk.js";
 
@@ -6,15 +5,6 @@ import { VoxelChunk } from "./voxel-chunk.js";
  * This Voxel chunk stores 0 bits (no data) for all meta-data
  */
 export class VoxelChunk0 extends VoxelChunk {
-
-    /**
-     * Constructs a VoxelChunk0 with an 0-bit (empty) meta-data buffer for each voxel.
-     * 
-     * @param key - The MortonKey representing the chunk's location in the voxel map.
-     */
-    constructor(key: MortonKey) {
-        super(key);
-    }
 
     /**
      * Sets the 8-bit meta-data for a specific voxel, identified by the provided VoxelIndex.
