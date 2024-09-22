@@ -1,5 +1,6 @@
 import { MortonKey } from "../../math/morton-key.js";
 import { BitOps } from "../../util/bit-ops.js";
+import { VoxelChunk0 } from "../chunks/voxel-chunk-0.js";
 import { VoxelChunk } from "../chunks/voxel-chunk.js";
 import { VoxelIndex } from "../voxel-index.js";
 import { VoxelWorld } from "../voxel-world.js";
@@ -45,7 +46,7 @@ export class VoxelFaceGeometry extends VoxelGeometry {
      * Placeholder VoxelChunk used when neighboring chunks are not available, ensuring that 
      * rendering continues without errors.
      */
-    private static readonly TMP_CHUNK: VoxelChunk = new VoxelChunk(VoxelFaceGeometry.TMP_MK);
+    private static readonly TMP_CHUNK: VoxelChunk = new VoxelChunk0(VoxelFaceGeometry.TMP_MK);
 
     /**
      * Computes the geometry indices for all BitVoxels in the given VoxelChunk. The geometry is 

@@ -14,6 +14,7 @@ export { BitOps } from "./lib/util/bit-ops.js";
 export { VoxelWorld } from "./lib/engine/voxel-world.js";
 export { BVXLayer } from "./lib/engine/layer/bvx-layer.js";
 export { VoxelChunk } from "./lib/engine/chunks/voxel-chunk.js";
+export { VoxelChunk0 } from "./lib/engine/chunks/voxel-chunk-0.js";
 export { VoxelChunk8 } from "./lib/engine/chunks/voxel-chunk-8.js";
 export { VoxelChunk16 } from "./lib/engine/chunks/voxel-chunk-16.js";
 export { VoxelChunk32 } from "./lib/engine/chunks/voxel-chunk-32.js";
