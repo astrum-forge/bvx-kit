@@ -28,7 +28,7 @@ jobs:
         run: echo ${{ env.RELEASE_VERSION }}
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: configure git
         run: |
           git config user.email "info@astrumforge.com"
@@ -40,7 +40,7 @@ jobs:
       - name: copy README
         run: cp README.md bvx-kit/README.md
       - name: copy LICENSE
-        run: cp LICENSE.md bvx-kit/LICENSE.md
+        run: cp LICENSE bvx-kit/LICENSE
       - name: copy graphics
         run: cp -R graphics bvx-kit/
       - name: NPM Login & Build
