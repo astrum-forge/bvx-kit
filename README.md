@@ -2,8 +2,7 @@
   <img src="graphics/icon_2.png?raw=true" alt="Astrum Forge Studios Logo" width="400">
 </h3>
 
-![License: Prosperity Public License](https://img.shields.io/badge/license-Prosperity%20Public%20License-blue)
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/0e1b2987a84d44ffa138719eea33943b)](https://app.codacy.com/gh/astrum-forge/bvx-kit/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 # BitVoxel Engine
 
