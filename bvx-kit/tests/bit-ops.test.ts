@@ -153,6 +153,13 @@ describe('BitOps', () => {
         expect(testValue).toBe(TEST_VALUE);
     });
 
+    it('.fromBitString() - bit string reverse conversion with a read offset', () => {
+        // reading from an offset should decode the full 32 bits that follow it
+        const testValue = BitOps.fromBitString("1111" + TEST_VALUE_STR, 4);
+
+        expect(testValue).toBe(TEST_VALUE);
+    });
+
     it('.flattenCoord2() - 2D coordinate flattening check', () => {
         expect(BitOps.flattenCoord2(0, 0, 2)).toBe(0);
         expect(BitOps.flattenCoord2(1, 1, 2)).toBe(5);
@@ -160,6 +167,9 @@ describe('BitOps', () => {
         expect(BitOps.flattenCoord2(3, 3, 2)).toBe(15);
         expect(BitOps.flattenCoord2(3, 0, 2)).toBe(12);
         expect(BitOps.flattenCoord2(0, 3, 2)).toBe(3);
+        // coordinates that overflow the bit range must wrap within 2 * bits
+        expect(BitOps.flattenCoord2(4, 0, 2)).toBe(0);
+        expect(BitOps.flattenCoord2(5, 1, 2)).toBe(5);
     });
 
     it('.flattenCoord3() - 3D coordinate flattening check', () => {

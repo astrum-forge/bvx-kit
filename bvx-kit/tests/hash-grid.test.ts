@@ -129,4 +129,63 @@ describe('HashGrid', () => {
 
         expect(removed).toBe(false);
     });
+
+    it('.length - counts all stored key-value pairs', () => {
+        // a small bucket count forces multiple values into the same bucket
+        const grid = new HashGrid<MortonKey, LinearKey>(4);
+
+        expect(grid.length).toBe(0);
+
+        for (let i = 0; i < 16; i++) {
+            grid.set(MortonKey.from(i, 0, 0), LinearKey.from(i, 0, 0));
+        }
+
+        expect(grid.length).toBe(16);
+
+        // updating an existing key must not change the length
+        grid.set(MortonKey.from(0, 0, 0), LinearKey.from(9, 9, 9));
+
+        expect(grid.length).toBe(16);
+
+        grid.remove(MortonKey.from(0, 0, 0));
+
+        expect(grid.length).toBe(15);
+    });
+
+    it('.values() .keys() - iterates all stored key-value pairs', () => {
+        // a small bucket count forces multiple values into the same bucket
+        const grid = new HashGrid<MortonKey, LinearKey>(4);
+
+        const expectedKeys = new Set<number>();
+
+        for (let i = 0; i < 16; i++) {
+            const key: MortonKey = MortonKey.from(i, 0, 0);
+
+            grid.set(key, LinearKey.from(i, 0, 0));
+            expectedKeys.add(key.key);
+        }
+
+        // every stored key must be yielded exactly once
+        const seenKeys = new Set<number>();
+
+        for (const key of grid.keys()) {
+            expect(expectedKeys.has(key)).toBe(true);
+            expect(seenKeys.has(key)).toBe(false);
+
+            seenKeys.add(key);
+        }
+
+        expect(seenKeys.size).toBe(16);
+
+        // every stored value must be yielded exactly once
+        const seenValues = new Set<number>();
+
+        for (const value of grid.values()) {
+            expect(seenValues.has(value.key)).toBe(false);
+
+            seenValues.add(value.key);
+        }
+
+        expect(seenValues.size).toBe(16);
+    });
 });

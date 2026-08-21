@@ -86,13 +86,26 @@ export class VoxelRaycaster {
         const worldKey: WorldIndex = VoxelRaycaster._TMP_KEY;
         const world: VoxelWorld = this._world;
 
+        // Cache the most recent chunk lookup. The ray remains within a single
+        // chunk for up to 16 steps, so this skips redundant hash lookups.
+        let cachedChunkKey: number = -1;
+        let cachedChunk: VoxelChunk | null = null;
+
         // Ray traversal through the voxel grid
         while (true) {
             // Calculate the current world index from voxel coordinates
             const worldCoord: WorldIndex = WorldIndex.from(i, j, k, worldKey);
 
-            // Get the chunk at the current world coordinate
-            const chunk: VoxelChunk | null = world.get(worldCoord.chunkIndex);
+            // Get the chunk at the current world coordinate, using the cached
+            // chunk when the ray has not crossed a chunk boundary
+            const chunkKey: number = worldCoord.chunkIndex.key;
+
+            if (chunkKey !== cachedChunkKey) {
+                cachedChunkKey = chunkKey;
+                cachedChunk = world.get(worldCoord.chunkIndex);
+            }
+
+            const chunk: VoxelChunk | null = cachedChunk;
 
             // Check if the current voxel contains a BitVoxel (1 indicates an active voxel)
             if (chunk !== null && chunk.getBitVoxel(worldCoord.voxelIndex) === 1) {

@@ -16,10 +16,10 @@ export class VoxelChunk32 extends VoxelChunk {
     private readonly _metaDataBuffer: ArrayBuffer;
 
     /**
-     * A Uint16Array view of the ArrayBuffer that holds the meta-data for each voxel.
-     * Each voxel's meta-data is represented by 32 bits (2 Uint16 values).
+     * A Uint32Array view of the ArrayBuffer that holds the meta-data for each voxel.
+     * Each voxel's meta-data is represented by 32 bits (1 Uint32 value).
      */
-    private readonly _metaData: Uint16Array;
+    private readonly _metaData: Uint32Array;
 
     /**
      * Constructs a VoxelChunk32 with a 32-bit meta-data buffer for each voxel.
@@ -31,12 +31,28 @@ export class VoxelChunk32 extends VoxelChunk {
 
         // Allocate enough space for 32 bits (4 bytes) of meta-data per voxel in the chunk (64 voxels).
         this._metaDataBuffer = new ArrayBuffer((VoxelChunk.SIZE * 32) / 8);
-        this._metaData = new Uint16Array(this._metaDataBuffer);
+        this._metaData = new Uint32Array(this._metaDataBuffer);
+    }
+
+    /**
+     * Returns the number of meta-data bits stored per voxel (always 32).
+     */
+    public override get metaBits(): number {
+        return 32;
+    }
+
+    /**
+     * Returns the Uint32Array view of the meta-data storage for this chunk.
+     * Useful for direct buffer access such as serialization or transfer
+     * between threads.
+     */
+    public override get metaData(): Uint32Array {
+        return this._metaData;
     }
 
     /**
      * Sets the 32-bit meta-data for a specific voxel, identified by the provided VoxelIndex.
-     * 
+     *
      * @param key - The VoxelIndex identifying the voxel.
      * @param meta - The 32-bit meta-data value to set for the voxel.
      */

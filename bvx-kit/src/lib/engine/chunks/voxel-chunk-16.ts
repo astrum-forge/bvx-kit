@@ -35,8 +35,24 @@ export class VoxelChunk16 extends VoxelChunk {
     }
 
     /**
+     * Returns the number of meta-data bits stored per voxel (always 16).
+     */
+    public override get metaBits(): number {
+        return 16;
+    }
+
+    /**
+     * Returns the Uint16Array view of the meta-data storage for this chunk.
+     * Useful for direct buffer access such as serialization or transfer
+     * between threads.
+     */
+    public override get metaData(): Uint16Array {
+        return this._metaData;
+    }
+
+    /**
      * Sets the 16-bit meta-data for a specific voxel, identified by the provided VoxelIndex.
-     * 
+     *
      * @param key - The VoxelIndex identifying the voxel.
      * @param meta - The 16-bit meta-data value to set for the voxel.
      */

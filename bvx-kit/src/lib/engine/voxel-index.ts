@@ -22,7 +22,9 @@ export class VoxelIndex implements Key {
     private _key = 0;
 
     constructor(key = 0) {
-        this._key = key | 0;
+        // mask to 12 bits so the key always addresses a valid BitVoxel,
+        // consistent with the behaviour of the key setter
+        this._key = (key | 0) & VoxelIndex.VALUE_MASK;
     }
 
     /**
