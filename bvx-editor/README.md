@@ -5,20 +5,23 @@ A companion editor for the **[BitVoxel Engine](../bvx-kit/)** — paint and view
 ## Features
 
 - **Paint / Erase / Pick** tools with brush sizes 1–4 and a 16 colour palette (colours are stored as voxel meta-data — one colour per Voxel, i.e. per 4×4×4 group of BitVoxels).
-- **Blocky rendering** via `VoxelFaceGeometry` face masks and **smooth rendering** via `VoxelSmoothGeometry` (surface nets) with an adjustable smoothing level (0–3).
-- **Off-main-thread meshing** through a pool of Web Workers running `BVXWorkerHost` / `BVXMesher`, with world snapshots supplied by `BVXSerializer` and geometry returned as transferables.
-- **Save / Load** scenes as compact binary `.bvx` files (`BVXSerializer.saveWorld` / `loadWorld`).
-- **Undo / Redo** with stroke granularity, implemented as chunk byte-snapshots.
+- **Sand / Water physics** via `VoxelPhysics` — pour granular sand that falls, piles and slides down slopes, and water that flows, pools and levels out. Sand sinks through water, displacing it upward. The simulation runs on a fixed 30 Hz timestep with play/pause and a clear button, and dormant grains cost nothing.
+- **Blocky rendering** via `VoxelFaceGeometry` face masks and **smooth rendering** via `VoxelSmoothGeometry` (surface nets) with an adjustable smoothing level (0–3). Physics layers render in both modes (water is translucent).
+- **Off-main-thread meshing** through a pool of Web Workers running `BVXWorkerHost` / `BVXMesher`, with world snapshots supplied by `BVXSerializer` and geometry returned as transferables. The simulation reports dirty chunks so only moving regions remesh.
+- **Save / Load** scenes as compact binary `.bvx` files — a container holding the base world plus the sand and water layers (legacy base-world-only files still load).
+- **Undo / Redo** with stroke granularity, implemented as chunk byte-snapshots. Applies to the base world only — sand and water are live simulation state and are not undo-tracked.
 - Demo scene generator, live statistics and keyboard shortcuts.
 
 ## Controls
 
 | Input | Action |
 | --- | --- |
-| Left-drag | Paint / erase with the active tool |
+| Left-drag | Paint / erase / pour with the active tool |
 | Middle/Right-drag | Orbit the camera |
 | Mouse wheel | Zoom |
 | `B` / `E` / `I` | Paint / Erase / Pick tool |
+| `S` / `W` | Sand / Water tool |
+| `Space` | Play / pause the physics simulation |
 | `1` – `4` | Brush size |
 | `Tab` | Toggle blocky/smooth rendering |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / Redo |

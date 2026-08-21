@@ -8,11 +8,16 @@ import {
     EraserIcon,
     LoadIcon,
     NewIcon,
+    PauseIcon,
     PickerIcon,
+    PlayIcon,
     RedoIcon,
+    SandIcon,
     SaveIcon,
     SparkleIcon,
-    UndoIcon
+    TrashIcon,
+    UndoIcon,
+    WaterIcon
 } from "./ui/Icons";
 
 /**
@@ -29,7 +34,8 @@ export const App = () => {
     const [colorIndex, setColorIndex] = useState(6);
     const [renderMode, setRenderMode] = useState<RenderMode>("blocky");
     const [smoothing, setSmoothing] = useState(1);
-    const [stats, setStats] = useState<EditorStats>({ chunks: 0, bitVoxels: 0, triangles: 0, workers: 0 });
+    const [playing, setPlaying] = useState(true);
+    const [stats, setStats] = useState<EditorStats>({ chunks: 0, bitVoxels: 0, triangles: 0, workers: 0, sandGrains: 0, waterGrains: 0, activeGrains: 0 });
     const [canUndo, setCanUndo] = useState(false);
     const [canRedo, setCanRedo] = useState(false);
 
@@ -91,6 +97,14 @@ export const App = () => {
     const selectSmoothing = useCallback((value: number) => {
         setSmoothing(value);
         editorRef.current?.setSmoothing(value);
+    }, []);
+
+    const togglePlaying = useCallback(() => {
+        setPlaying((current) => {
+            editorRef.current?.setPlaying(!current);
+
+            return !current;
+        });
     }, []);
 
     const saveScene = useCallback(() => {
@@ -160,6 +174,8 @@ export const App = () => {
                 case "b": selectTool("paint"); break;
                 case "e": selectTool("erase"); break;
                 case "i": selectTool("pick"); break;
+                case "s": selectTool("sand"); break;
+                case "w": selectTool("water"); break;
                 case "1": case "2": case "3": case "4":
                     selectBrushSize(parseInt(event.key, 10));
                     break;
@@ -167,13 +183,17 @@ export const App = () => {
                     event.preventDefault();
                     selectRenderMode(renderMode === "blocky" ? "smooth" : "blocky");
                     break;
+                case " ":
+                    event.preventDefault();
+                    togglePlaying();
+                    break;
             }
         };
 
         window.addEventListener("keydown", onKeyDown);
 
         return () => window.removeEventListener("keydown", onKeyDown);
-    }, [renderMode, saveScene, selectBrushSize, selectRenderMode, selectTool]);
+    }, [renderMode, saveScene, selectBrushSize, selectRenderMode, selectTool, togglePlaying]);
 
     // ----- render -----
 
@@ -241,6 +261,17 @@ export const App = () => {
                         </button>
                         <button className={`rail-button ${tool === "pick" ? "active" : ""}`} title="Pick colour (I)" onClick={() => selectTool("pick")}>
                             <PickerIcon size={20} />
+                        </button>
+                    </div>
+
+                    <div className="rail-label">Physics</div>
+
+                    <div className="rail-group">
+                        <button className={`rail-button sand ${tool === "sand" ? "active" : ""}`} title="Pour sand (S)" onClick={() => selectTool("sand")}>
+                            <SandIcon size={20} />
+                        </button>
+                        <button className={`rail-button water ${tool === "water" ? "active" : ""}`} title="Pour water (W)" onClick={() => selectTool("water")}>
+                            <WaterIcon size={20} />
                         </button>
                     </div>
 
@@ -316,6 +347,28 @@ export const App = () => {
                     </section>
 
                     <section className="panel">
+                        <h3>Physics</h3>
+
+                        <div className="physics-controls">
+                            <button className={`physics-toggle ${playing ? "playing" : ""}`} title="Play/pause simulation (Space)" onClick={togglePlaying}>
+                                {playing ? <PauseIcon size={15} /> : <PlayIcon size={15} />}
+                                {playing ? "Running" : "Paused"}
+                            </button>
+                            <button className="physics-clear" title="Remove all sand and water" onClick={() => editorRef.current?.clearPhysics()}>
+                                <TrashIcon size={15} />
+                            </button>
+                        </div>
+
+                        <dl className="stats">
+                            <div><dt>Sand</dt><dd>{stats.sandGrains.toLocaleString()}</dd></div>
+                            <div><dt>Water</dt><dd>{stats.waterGrains.toLocaleString()}</dd></div>
+                            <div><dt>Moving</dt><dd>{stats.activeGrains.toLocaleString()}</dd></div>
+                        </dl>
+
+                        <p className="note">Sand piles and sinks through water. Water flows, pools and levels out.</p>
+                    </section>
+
+                    <section className="panel">
                         <h3>Statistics</h3>
 
                         <dl className="stats">
@@ -331,6 +384,8 @@ export const App = () => {
 
                         <dl className="shortcuts">
                             <div><dt>B / E / I</dt><dd>Paint / Erase / Pick</dd></div>
+                            <div><dt>S / W</dt><dd>Sand / Water</dd></div>
+                            <div><dt>Space</dt><dd>Play / pause physics</dd></div>
                             <div><dt>1 – 4</dt><dd>Brush size</dd></div>
                             <div><dt>Tab</dt><dd>Toggle render mode</dd></div>
                             <div><dt>Ctrl+Z</dt><dd>Undo</dd></div>

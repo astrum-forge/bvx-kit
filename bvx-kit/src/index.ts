@@ -26,6 +26,13 @@ export { VoxelSmoothGeometry } from "./lib/engine/geometry/voxel-smooth-geometry
 export { VoxelRay } from "./lib/engine/raycaster/voxel-ray.js";
 export { VoxelRaycaster } from "./lib/engine/raycaster/voxel-raycaster.js";
 
+// export physics
+export { VoxelPhysics } from "./lib/engine/physics/voxel-physics.js";
+export type { VoxelPhysicsOptions } from "./lib/engine/physics/voxel-physics.js";
+export { VoxelPhysicsLayer } from "./lib/engine/physics/voxel-physics-layer.js";
+export type { VoxelPhysicsParams } from "./lib/engine/physics/voxel-physics-layer.js";
+export { PhysicsVoxelChunk } from "./lib/engine/physics/physics-voxel-chunk.js";
+
 // export serialization
 export { BVXSerializer } from "./lib/serialize/bvx-serializer.js";
 

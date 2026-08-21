@@ -18,6 +18,8 @@ import {
     MortonKey,
     VoxelChunk16,
     VoxelIndex,
+    VoxelPhysics,
+    VoxelPhysicsLayer,
     VoxelWorld,
     type MesherRequest,
     type MesherResponse
@@ -26,9 +28,10 @@ import { MesherPool } from "./mesher-pool";
 import { PALETTE } from "./palette";
 
 /**
- * The active editing tool.
+ * The active editing tool. Paint/erase/pick operate on the static base world,
+ * sand/water paint grains into the corresponding physics layer.
  */
-export type EditorTool = "paint" | "erase" | "pick";
+export type EditorTool = "paint" | "erase" | "pick" | "sand" | "water";
 
 /**
  * The active rendering mode for BitVoxel geometry.
@@ -43,15 +46,60 @@ export interface EditorStats {
     bitVoxels: number;
     triangles: number;
     workers: number;
+    sandGrains: number;
+    waterGrains: number;
+    activeGrains: number;
 }
 
 /**
- * A single undoable brush stroke - byte snapshots of every touched chunk
- * before and after the stroke (null = the chunk did not exist).
+ * A single undoable brush stroke - byte snapshots of every touched base-world
+ * chunk before and after the stroke (null = the chunk did not exist). Physics
+ * grains are transient simulation state and are not undo-tracked.
  */
 interface StrokeRecord {
     before: Map<number, Uint8Array | null>;
     after: Map<number, Uint8Array | null>;
+}
+
+/**
+ * One renderable world - the base world or a physics layer - with its own
+ * meshes, meshing bookkeeping and colouring rules.
+ */
+interface MeshLane {
+    /**
+     * Lane identifier, used in mesh names.
+     */
+    id: string;
+
+    /**
+     * Resolves the lane's current VoxelWorld (physics worlds are recreated on
+     * scene resets).
+     */
+    world: () => VoxelWorld;
+
+    /**
+     * Renderable mesh and triangle count per chunk key.
+     */
+    meshes: Map<number, Mesh>;
+    triangles: Map<number, number>;
+
+    /**
+     * Meshing bookkeeping - chunks with a request in flight and chunks that
+     * were re-dirtied while their request was still running (latest-wins).
+     */
+    inFlight: Set<number>;
+    dirtyAgain: Set<number>;
+
+    /**
+     * Flat vertex colour for the lane, or null to colour from voxel meta-data
+     * (the base lane).
+     */
+    color: [number, number, number] | null;
+
+    /**
+     * Shared material for all of the lane's meshes.
+     */
+    material: StandardMaterial;
 }
 
 /**
@@ -69,6 +117,18 @@ const REGION_CHUNKS = 8;
  * The editable region in BitVoxels per axis.
  */
 const REGION = REGION_CHUNKS * 16;
+
+/**
+ * The fixed physics timestep in Hz and the catch-up cap per rendered frame.
+ */
+const PHYSICS_RATE = 30;
+const PHYSICS_MAX_TICKS_PER_FRAME = 4;
+
+/**
+ * Flat colours for the physics lanes.
+ */
+const SAND_COLOR: [number, number, number] = [0.91, 0.76, 0.44];
+const WATER_COLOR: [number, number, number] = [0.28, 0.56, 0.92];
 
 /**
  * Blocky face corner offsets, indexed by the VoxelFaceGeometry face bit index.
@@ -92,9 +152,10 @@ const FACE_NORMALS: number[][] = [
 ];
 
 /**
- * VoxelEditor owns the BabylonJS scene, the bvx-kit VoxelWorld and the meshing
- * worker pool. It handles painting, erasing, colour picking, undo/redo,
- * save/load and keeps one renderable mesh per chunk up to date.
+ * VoxelEditor owns the BabylonJS scene, the bvx-kit VoxelWorld, the physics
+ * simulation and the meshing worker pool. It handles painting, erasing, colour
+ * picking, sand/water simulation, undo/redo, save/load and keeps one
+ * renderable mesh per chunk per lane up to date.
  */
 export class VoxelEditor {
     private readonly _canvas: HTMLCanvasElement;
@@ -106,21 +167,28 @@ export class VoxelEditor {
 
     private _world: VoxelWorld = new VoxelWorld();
 
-    // one renderable mesh + triangle count per chunk key
-    private readonly _meshes = new Map<number, Mesh>();
-    private readonly _triangles = new Map<number, number>();
+    // physics simulation over the base world
+    private _physics!: VoxelPhysics;
+    private _sand!: VoxelPhysicsLayer;
+    private _water!: VoxelPhysicsLayer;
+    private _playing = true;
+    private _physicsAccumulator = 0;
+    private _physicsWasMoving = false;
 
-    // meshing bookkeeping - chunks with a request in flight and chunks that were
-    // re-dirtied while their request was still running (latest-wins)
-    private readonly _inFlight = new Set<number>();
-    private readonly _dirtyAgain = new Set<number>();
+    // renderable lanes - base world plus one per physics layer
+    private readonly _baseLane: MeshLane;
+    private readonly _sandLane: MeshLane;
+    private readonly _waterLane: MeshLane;
+    private readonly _lanes: MeshLane[];
 
-    // undo/redo stacks of stroke records
+    // undo/redo stacks of stroke records (base world only)
     private readonly _undoStack: StrokeRecord[] = [];
     private readonly _redoStack: StrokeRecord[] = [];
 
-    // the stroke currently being painted, if any
+    // the stroke currently being painted, if any - physics strokes carry no
+    // undo record but are still drag-applied while active
     private _stroke: StrokeRecord | null = null;
+    private _strokeActive = false;
     private _lastStrokeCell: [number, number, number] | null = null;
 
     // editor settings
@@ -137,6 +205,10 @@ export class VoxelEditor {
     // shared scratch objects to avoid per-event allocations
     private readonly _scratchKey = new MortonKey();
     private readonly _scratchIndex = new VoxelIndex();
+    private readonly _scratchDirty = new Set<number>();
+
+    // throttled stats publishing
+    private _statsTimer = 0;
 
     /**
      * Invoked whenever the scene statistics change.
@@ -192,6 +264,14 @@ export class VoxelEditor {
 
         this._buildGrid();
 
+        // renderable lanes
+        this._baseLane = this._makeLane("base", () => this._world, null, 1.0);
+        this._sandLane = this._makeLane("sand", () => this._sand.world, SAND_COLOR, 1.0);
+        this._waterLane = this._makeLane("water", () => this._water.world, WATER_COLOR, 0.55);
+        this._lanes = [this._baseLane, this._sandLane, this._waterLane];
+
+        this._setupPhysics();
+
         // hover cursor box
         this._cursorMaterial = new StandardMaterial("cursor-mat", scene);
         this._cursorMaterial.emissiveColor = Color3.FromHexString("#6c8cff");
@@ -212,6 +292,9 @@ export class VoxelEditor {
 
         this._resizeObserver = new ResizeObserver(() => this._engine.resize());
         this._resizeObserver.observe(canvas);
+
+        // fixed-step physics driven by the render loop
+        scene.onBeforeRenderObservable.add(() => this._updatePhysics());
 
         this._engine.runRenderLoop(() => scene.render());
     }
@@ -274,19 +357,188 @@ export class VoxelEditor {
         }
     }
 
-    // ---------------------------------------------------------------- file ops
+    // ----------------------------------------------------------------- physics
 
     /**
-     * Serializes the current world into compact binary data (.bvx).
+     * Whether the physics simulation is advancing.
      */
-    public save(): Uint8Array {
-        return BVXSerializer.saveWorld(this._world);
+    public get playing(): boolean {
+        return this._playing;
+    }
+
+    public setPlaying(playing: boolean): void {
+        this._playing = playing;
+        this._physicsAccumulator = 0;
     }
 
     /**
-     * Replaces the current world with the provided binary data (.bvx).
+     * Removes all sand and water grains from the scene.
+     */
+    public clearPhysics(): void {
+        this._sand.clear();
+        this._water.clear();
+
+        this._drainPhysicsDirty();
+        this._publishStats(true);
+    }
+
+    /**
+     * Recreates the physics simulation over the current base world. Used on
+     * construction and whenever the base world instance is replaced.
+     */
+    private _setupPhysics(): void {
+        this._physics = new VoxelPhysics(this._world, {
+            maxX: REGION - 1,
+            maxY: REGION - 1,
+            maxZ: REGION - 1
+        });
+
+        this._sand = this._physics.addLayer(VoxelPhysics.SAND);
+        this._water = this._physics.addLayer(VoxelPhysics.WATER);
+        this._physicsAccumulator = 0;
+    }
+
+    /**
+     * Advances the physics simulation on a fixed timestep, driven by the render
+     * loop, and remeshes whatever moved.
+     */
+    private _updatePhysics(): void {
+        if (!this._playing) {
+            return;
+        }
+
+        this._physicsAccumulator += this._engine.getDeltaTime();
+
+        const tickMillis = 1000 / PHYSICS_RATE;
+
+        let ticks = 0;
+        let moves = 0;
+
+        while (this._physicsAccumulator >= tickMillis && ticks < PHYSICS_MAX_TICKS_PER_FRAME) {
+            moves += this._physics.update();
+            this._physicsAccumulator -= tickMillis;
+            ticks++;
+        }
+
+        // drop any remaining backlog so slow frames never spiral
+        if (this._physicsAccumulator > tickMillis) {
+            this._physicsAccumulator = 0;
+        }
+
+        if (ticks > 0) {
+            this._drainPhysicsDirty();
+
+            // publish while moving, and once more when the simulation settles
+            // so the final counts are not left stale
+            if (moves > 0) {
+                this._physicsWasMoving = true;
+                this._publishStats(false);
+            }
+            else if (this._physicsWasMoving) {
+                this._physicsWasMoving = false;
+                this._publishStats(true);
+            }
+        }
+    }
+
+    /**
+     * Requests remeshes for every physics chunk that changed since the last drain.
+     */
+    private _drainPhysicsDirty(): void {
+        const dirty = this._scratchDirty;
+
+        dirty.clear();
+        this._sand.drainDirtyChunks(dirty);
+
+        for (const key of dirty) {
+            this._requestMesh(this._sandLane, key);
+        }
+
+        dirty.clear();
+        this._water.drainDirtyChunks(dirty);
+
+        for (const key of dirty) {
+            this._requestMesh(this._waterLane, key);
+        }
+    }
+
+    // ---------------------------------------------------------------- file ops
+
+    /**
+     * Serializes the scene into compact binary data (.bvx). The container
+     * (format BVE2) holds the base world plus the sand and water layers, each
+     * framed as a BVXSerializer world payload.
+     */
+    public save(): Uint8Array {
+        const payloads: Uint8Array[] = [
+            BVXSerializer.saveWorld(this._world),
+            BVXSerializer.saveWorld(this._sand.world),
+            BVXSerializer.saveWorld(this._water.world)
+        ];
+
+        let total = 5; // magic + payload count
+
+        for (const payload of payloads) {
+            total += 4 + payload.length;
+        }
+
+        const data = new Uint8Array(total);
+        const view = new DataView(data.buffer);
+
+        data[0] = 0x42; // B
+        data[1] = 0x56; // V
+        data[2] = 0x45; // E
+        data[3] = 0x32; // 2
+        data[4] = payloads.length;
+
+        let offset = 5;
+
+        for (const payload of payloads) {
+            view.setUint32(offset, payload.length, true);
+            data.set(payload, offset + 4);
+            offset += 4 + payload.length;
+        }
+
+        return data;
+    }
+
+    /**
+     * Replaces the scene with the provided binary data. Accepts both the BVE2
+     * container (base + physics layers) and plain BVW1 world data.
      */
     public load(data: Uint8Array): void {
+        // BVE2 container - base world plus physics layer payloads
+        if (data.length >= 5 && data[0] === 0x42 && data[1] === 0x56 && data[2] === 0x45 && data[3] === 0x32) {
+            const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+            const count = data[4];
+            const payloads: Uint8Array[] = [];
+
+            let offset = 5;
+
+            for (let i = 0; i < count; i++) {
+                const length = view.getUint32(offset, true);
+
+                payloads.push(data.subarray(offset + 4, offset + 4 + length));
+                offset += 4 + length;
+            }
+
+            this._replaceWorld(BVXSerializer.loadWorld(payloads[0]));
+
+            if (payloads.length > 1) {
+                this._sand.importWorld(BVXSerializer.loadWorld(payloads[1]));
+            }
+
+            if (payloads.length > 2) {
+                this._water.importWorld(BVXSerializer.loadWorld(payloads[2]));
+            }
+
+            this._drainPhysicsDirty();
+            this._publishStats(true);
+
+            return;
+        }
+
+        // plain BVW1 world data (legacy saves)
         this._replaceWorld(BVXSerializer.loadWorld(data));
     }
 
@@ -350,7 +602,7 @@ export class VoxelEditor {
     }
 
     /**
-     * Reverts the most recent stroke.
+     * Reverts the most recent base-world stroke.
      */
     public undo(): void {
         const record = this._undoStack.pop();
@@ -365,7 +617,7 @@ export class VoxelEditor {
     }
 
     /**
-     * Re-applies the most recently undone stroke.
+     * Re-applies the most recently undone base-world stroke.
      */
     public redo(): void {
         const record = this._redoStack.pop();
@@ -396,6 +648,28 @@ export class VoxelEditor {
     // ------------------------------------------------------------------ scene
 
     /**
+     * Creates a renderable lane with its shared material.
+     */
+    private _makeLane(id: string, world: () => VoxelWorld, color: [number, number, number] | null, alpha: number): MeshLane {
+        const material = new StandardMaterial(`lane-mat-${id}`, this._scene);
+
+        material.diffuseColor = Color3.White();
+        material.specularColor = alpha < 1.0 ? new Color3(0.25, 0.28, 0.32) : new Color3(0.04, 0.04, 0.05);
+        material.alpha = alpha;
+
+        return {
+            id: id,
+            world: world,
+            meshes: new Map<number, Mesh>(),
+            triangles: new Map<number, number>(),
+            inFlight: new Set<number>(),
+            dirtyAgain: new Set<number>(),
+            color: color,
+            material: material
+        };
+    }
+
+    /**
      * Builds the ground reference grid - fine lines per Voxel, strong lines per chunk.
      */
     private _buildGrid(): void {
@@ -423,7 +697,8 @@ export class VoxelEditor {
     }
 
     /**
-     * Swaps in a new world, clears history and rebuilds all chunk meshes.
+     * Swaps in a new base world, resets physics, clears history and rebuilds
+     * all chunk meshes.
      */
     private _replaceWorld(world: VoxelWorld): void {
         this._world = world;
@@ -433,27 +708,35 @@ export class VoxelEditor {
         this._stroke = null;
         this._notifyHistory();
 
-        for (const mesh of this._meshes.values()) {
-            mesh.dispose();
+        for (const lane of this._lanes) {
+            for (const mesh of lane.meshes.values()) {
+                mesh.dispose();
+            }
+
+            lane.meshes.clear();
+            lane.triangles.clear();
+            lane.inFlight.clear();
+            lane.dirtyAgain.clear();
         }
 
-        this._meshes.clear();
-        this._triangles.clear();
-        this._inFlight.clear();
-        this._dirtyAgain.clear();
+        // the physics simulation holds a reference to the base world - recreate
+        // it (which also clears all grains)
+        this._setupPhysics();
 
         this._remeshAll();
     }
 
     /**
-     * Queues a remesh for every chunk in the world.
+     * Queues a remesh for every chunk in every lane.
      */
     private _remeshAll(): void {
-        for (const chunk of this._world.chunks.values()) {
-            this._requestMesh(chunk.key.key);
+        for (const lane of this._lanes) {
+            for (const chunk of lane.world().chunks.values()) {
+                this._requestMesh(lane, chunk.key.key);
+            }
         }
 
-        this._publishStats();
+        this._publishStats(true);
     }
 
     // --------------------------------------------------------------- painting
@@ -487,7 +770,11 @@ export class VoxelEditor {
             // ignore - painting still works without capture
         }
 
-        this._stroke = { before: new Map(), after: new Map() };
+        // physics strokes are transient simulation state and not undo-tracked
+        const isBaseTool = this._tool === "paint" || this._tool === "erase";
+
+        this._stroke = isBaseTool ? { before: new Map(), after: new Map() } : null;
+        this._strokeActive = true;
         this._lastStrokeCell = null;
 
         if (target.brushCell) {
@@ -500,7 +787,7 @@ export class VoxelEditor {
 
         this._updateCursor(this._tool === "pick" ? target.pickCell : target.brushCell);
 
-        if (this._stroke && target.brushCell) {
+        if (this._strokeActive && target.brushCell) {
             const last = this._lastStrokeCell;
             const cell = target.brushCell;
 
@@ -512,29 +799,32 @@ export class VoxelEditor {
     };
 
     private readonly _onPointerUp = (event: PointerEvent): void => {
-        if (event.button !== 0 || !this._stroke) {
+        if (event.button !== 0) {
             return;
         }
 
-        // snapshot the final state of every chunk the stroke touched
-        for (const key of this._stroke.before.keys()) {
-            const chunk = this._world.get(new MortonKey(key));
-            this._stroke.after.set(key, chunk !== null ? BVXSerializer.saveChunk(chunk) : null);
-        }
-
-        if (this._stroke.before.size > 0) {
-            this._undoStack.push(this._stroke);
-
-            // cap the history depth
-            if (this._undoStack.length > 64) {
-                this._undoStack.shift();
+        if (this._stroke) {
+            // snapshot the final state of every base chunk the stroke touched
+            for (const key of this._stroke.before.keys()) {
+                const chunk = this._world.get(new MortonKey(key));
+                this._stroke.after.set(key, chunk !== null ? BVXSerializer.saveChunk(chunk) : null);
             }
 
-            this._redoStack.length = 0;
-            this._notifyHistory();
+            if (this._stroke.before.size > 0) {
+                this._undoStack.push(this._stroke);
+
+                // cap the history depth
+                if (this._undoStack.length > 64) {
+                    this._undoStack.shift();
+                }
+
+                this._redoStack.length = 0;
+                this._notifyHistory();
+            }
         }
 
         this._stroke = null;
+        this._strokeActive = false;
         this._lastStrokeCell = null;
     };
 
@@ -568,10 +858,10 @@ export class VoxelEditor {
             };
         }
 
-        // no voxel hit - fall back to the ground plane for painting. In BitVoxel
-        // space the ray is p(t) = origin + direction * t with the same direction,
-        // so the plane intersection needs no further unit conversion
-        if (this._tool === "paint" && ray.direction.y < -1e-6) {
+        // no voxel hit - fall back to the ground plane for placement tools. In
+        // BitVoxel space the ray is p(t) = origin + direction * t with the same
+        // direction, so the plane intersection needs no further unit conversion
+        if (this._tool !== "erase" && ray.direction.y < -1e-6) {
             const t = -oy / ray.direction.y;
             const gx = Math.floor(ox + (ray.direction.x * t));
             const gz = Math.floor(oz + (ray.direction.z * t));
@@ -586,7 +876,8 @@ export class VoxelEditor {
 
     /**
      * Casts a ray through the BitVoxel grid (Amanatides & Woo traversal),
-     * returning the first solid cell and the empty cell just before it.
+     * returning the first solid cell (base world or any physics layer) and the
+     * empty cell just before it.
      */
     private _castRay(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number):
         { hit: boolean, cell: [number, number, number], prev: [number, number, number] } {
@@ -615,7 +906,7 @@ export class VoxelEditor {
         for (let i = 0; i < REGION * 6; i++) {
             const inside = x >= 0 && x < REGION && y >= 0 && y < REGION && z >= 0 && z < REGION;
 
-            if (inside && this._getBitVoxelAt(x, y, z) === 1) {
+            if (inside && this._isSolidAt(x, y, z)) {
                 return { hit: true, cell: [x, y, z], prev: [px, py, pz] };
             }
 
@@ -641,7 +932,7 @@ export class VoxelEditor {
     }
 
     /**
-     * Applies the current brush (paint or erase) centered on the provided cell.
+     * Applies the current brush centered on the provided cell.
      */
     private _applyBrush(center: [number, number, number]): void {
         this._lastStrokeCell = center;
@@ -654,11 +945,24 @@ export class VoxelEditor {
 
         let minX = REGION, minY = REGION, minZ = REGION;
         let maxX = 0, maxY = 0, maxZ = 0;
+        let physicsTouched = false;
 
         for (let x = center[0] - low; x <= center[0] + high; x++) {
             for (let y = center[1] - low; y <= center[1] + high; y++) {
                 for (let z = center[2] - low; z <= center[2] + high; z++) {
                     if (x < 0 || x >= REGION || y < 0 || y >= REGION || z < 0 || z >= REGION) {
+                        continue;
+                    }
+
+                    if (this._tool === "sand" || this._tool === "water") {
+                        // grains only occupy globally free cells
+                        if (!this._isSolidAt(x, y, z)) {
+                            const layer = this._tool === "sand" ? this._sand : this._water;
+
+                            layer.set(x, y, z);
+                            physicsTouched = true;
+                        }
+
                         continue;
                     }
 
@@ -671,10 +975,20 @@ export class VoxelEditor {
                     }
 
                     if (this._tool === "paint") {
+                        // never paint solid ground into a cell a grain occupies
+                        if (this._sand.get(x, y, z) === 1 || this._water.get(x, y, z) === 1) {
+                            continue;
+                        }
+
                         this._setBitVoxelAt(x, y, z, this._colorIndex);
                     }
                     else {
                         this._unsetBitVoxelAt(x, y, z);
+
+                        // the eraser also removes grains
+                        if (this._sand.unset(x, y, z) || this._water.unset(x, y, z)) {
+                            physicsTouched = true;
+                        }
                     }
 
                     touched.add(chunkKey);
@@ -685,16 +999,24 @@ export class VoxelEditor {
             }
         }
 
-        if (touched.size === 0) {
-            return;
+        if (touched.size > 0) {
+            this._remeshRegion(touched, minX, minY, minZ, maxX, maxY, maxZ);
+
+            // resting grains near the edit must re-evaluate their support
+            this._physics.wakeRegion(minX, minY, minZ, maxX, maxY, maxZ);
         }
 
-        this._remeshRegion(touched, minX, minY, minZ, maxX, maxY, maxZ);
-        this._publishStats();
+        if (physicsTouched) {
+            this._drainPhysicsDirty();
+        }
+
+        if (touched.size > 0 || physicsTouched) {
+            this._publishStats(true);
+        }
     }
 
     /**
-     * Queues remeshes for the edited chunks plus any existing neighbouring
+     * Queues remeshes for the edited base chunks plus any existing neighbouring
      * chunks whose geometry can be affected by the edit.
      */
     private _remeshRegion(touched: Set<number>, minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number): void {
@@ -723,14 +1045,22 @@ export class VoxelEditor {
         }
 
         for (const key of keys) {
-            this._requestMesh(key);
+            this._requestMesh(this._baseLane, key);
         }
     }
 
     // ------------------------------------------------------------ voxel access
 
     /**
-     * Reads a BitVoxel state at global BitVoxel coordinates.
+     * Returns whether any world (base or physics layer) occupies the provided
+     * global BitVoxel coordinates.
+     */
+    private _isSolidAt(x: number, y: number, z: number): boolean {
+        return this._getBitVoxelAt(x, y, z) === 1 || this._sand.get(x, y, z) === 1 || this._water.get(x, y, z) === 1;
+    }
+
+    /**
+     * Reads a base-world BitVoxel state at global BitVoxel coordinates.
      */
     private _getBitVoxelAt(x: number, y: number, z: number): number {
         const chunk = this._world.get(MortonKey.from(x >> 4, y >> 4, z >> 4, this._scratchKey));
@@ -767,8 +1097,8 @@ export class VoxelEditor {
     }
 
     /**
-     * Sets a BitVoxel and its Voxel colour at global BitVoxel coordinates,
-     * creating the owning chunk on demand.
+     * Sets a base-world BitVoxel and its Voxel colour at global BitVoxel
+     * coordinates, creating the owning chunk on demand.
      */
     private _setBitVoxelAt(x: number, y: number, z: number, colorIndex: number): void {
         const key = MortonKey.from(x >> 4, y >> 4, z >> 4, this._scratchKey);
@@ -790,7 +1120,7 @@ export class VoxelEditor {
     }
 
     /**
-     * Unsets a BitVoxel at global BitVoxel coordinates.
+     * Unsets a base-world BitVoxel at global BitVoxel coordinates.
      */
     private _unsetBitVoxelAt(x: number, y: number, z: number): void {
         const chunk = this._world.get(MortonKey.from(x >> 4, y >> 4, z >> 4, this._scratchKey));
@@ -835,7 +1165,8 @@ export class VoxelEditor {
     }
 
     /**
-     * Restores chunk byte snapshots (undo/redo) and remeshes the affected area.
+     * Restores base chunk byte snapshots (undo/redo), remeshes the affected
+     * area and wakes any physics grains resting on the changed geometry.
      */
     private _applySnapshots(snapshots: Map<number, Uint8Array | null>): void {
         for (const [key, data] of snapshots) {
@@ -844,12 +1175,12 @@ export class VoxelEditor {
             if (data === null) {
                 this._world.remove(mortonKey);
 
-                const mesh = this._meshes.get(key);
+                const mesh = this._baseLane.meshes.get(key);
 
                 if (mesh) {
                     mesh.dispose();
-                    this._meshes.delete(key);
-                    this._triangles.delete(key);
+                    this._baseLane.meshes.delete(key);
+                    this._baseLane.triangles.delete(key);
                 }
             }
             else {
@@ -857,11 +1188,14 @@ export class VoxelEditor {
             }
         }
 
-        // remesh restored chunks and every existing neighbour around them
+        // remesh restored chunks and every existing neighbour around them, and
+        // wake grains that may have lost or gained support
         const keys = new Set<number>();
 
         for (const key of snapshots.keys()) {
             const mortonKey = new MortonKey(key);
+
+            this._physics.wakeRegion(mortonKey.x << 4, mortonKey.y << 4, mortonKey.z << 4, (mortonKey.x << 4) + 15, (mortonKey.y << 4) + 15, (mortonKey.z << 4) + 15);
 
             for (let ox = -1; ox <= 1; ox++) {
                 for (let oy = -1; oy <= 1; oy++) {
@@ -877,42 +1211,44 @@ export class VoxelEditor {
         }
 
         for (const key of keys) {
-            this._requestMesh(key);
+            this._requestMesh(this._baseLane, key);
         }
 
-        this._publishStats();
+        this._publishStats(true);
     }
 
     // ---------------------------------------------------------------- meshing
 
     /**
-     * Queues a meshing request for the chunk. If a request for the chunk is
-     * already in flight, the chunk is re-queued when the response arrives.
+     * Queues a meshing request for a chunk of the provided lane. If a request
+     * for the chunk is already in flight, the chunk is re-queued when the
+     * response arrives.
      */
-    private _requestMesh(chunkKey: number): void {
-        if (this._inFlight.has(chunkKey)) {
-            this._dirtyAgain.add(chunkKey);
+    private _requestMesh(lane: MeshLane, chunkKey: number): void {
+        if (lane.inFlight.has(chunkKey)) {
+            lane.dirtyAgain.add(chunkKey);
 
             return;
         }
 
+        const world = lane.world();
         const mortonKey = new MortonKey(chunkKey);
-        const chunk = this._world.get(mortonKey);
+        const chunk = world.get(mortonKey);
 
         if (chunk === null) {
             // chunk no longer exists - drop its mesh
-            const mesh = this._meshes.get(chunkKey);
+            const mesh = lane.meshes.get(chunkKey);
 
             if (mesh) {
                 mesh.dispose();
-                this._meshes.delete(chunkKey);
-                this._triangles.delete(chunkKey);
+                lane.meshes.delete(chunkKey);
+                lane.triangles.delete(chunkKey);
             }
 
             return;
         }
 
-        this._inFlight.add(chunkKey);
+        lane.inFlight.add(chunkKey);
 
         // snapshot the chunk and its 26 neighbours for seam-correct meshing
         const region = new VoxelWorld();
@@ -920,7 +1256,7 @@ export class VoxelEditor {
         for (let ox = -1; ox <= 1; ox++) {
             for (let oy = -1; oy <= 1; oy++) {
                 for (let oz = -1; oz <= 1; oz++) {
-                    const neighbour = this._world.get(MortonKey.from(mortonKey.x + ox, mortonKey.y + oy, mortonKey.z + oz, this._scratchKey));
+                    const neighbour = world.get(MortonKey.from(mortonKey.x + ox, mortonKey.y + oy, mortonKey.z + oz, this._scratchKey));
 
                     if (neighbour !== null) {
                         region.insert(neighbour);
@@ -937,16 +1273,16 @@ export class VoxelEditor {
             ? { id: 0, type: "faces", chunkKey: chunkKey, flipped: true, world: snapshot }
             : { id: 0, type: "smooth", chunkKey: chunkKey, smoothing: this._smoothing, flipped: true, world: snapshot };
 
-        this._pool.request(request).then((response) => this._onMeshResponse(response));
+        this._pool.request(request).then((response) => this._onMeshResponse(lane, response));
     }
 
     /**
      * Applies a meshing response to the chunk's renderable mesh.
      */
-    private _onMeshResponse(response: MesherResponse): void {
+    private _onMeshResponse(lane: MeshLane, response: MesherResponse): void {
         const chunkKey = response.chunkKey;
 
-        this._inFlight.delete(chunkKey);
+        lane.inFlight.delete(chunkKey);
 
         // the render mode changed while the request was in flight - the mode
         // switch already queued fresh requests, drop this stale response
@@ -954,28 +1290,28 @@ export class VoxelEditor {
 
         if (response.type === expected) {
             if (response.type === "faces") {
-                this._applyBlockyMesh(chunkKey, response.faceMasks);
+                this._applyBlockyMesh(lane, chunkKey, response.faceMasks);
             }
             else {
-                this._applySmoothMesh(chunkKey, response.vertices, response.normals, response.indices);
+                this._applySmoothMesh(lane, chunkKey, response.vertices, response.normals, response.indices);
             }
         }
 
         // the chunk was edited again while the request was running
-        if (this._dirtyAgain.delete(chunkKey)) {
-            this._requestMesh(chunkKey);
+        if (lane.dirtyAgain.delete(chunkKey)) {
+            this._requestMesh(lane, chunkKey);
         }
 
-        this._publishStats();
+        this._publishStats(false);
     }
 
     /**
      * Builds a compact blocky mesh from the 6-bit face masks - one coloured quad
      * per visible BitVoxel face.
      */
-    private _applyBlockyMesh(chunkKey: number, faceMasks: Uint8Array): void {
+    private _applyBlockyMesh(lane: MeshLane, chunkKey: number, faceMasks: Uint8Array): void {
         const mortonKey = new MortonKey(chunkKey);
-        const chunk = this._world.get(mortonKey);
+        const chunk = lane.world().get(mortonKey);
 
         // count the visible faces to size the buffers exactly
         let faceCount = 0;
@@ -990,7 +1326,7 @@ export class VoxelEditor {
         }
 
         if (faceCount === 0 || chunk === null) {
-            this._disposeOrClear(chunkKey);
+            this._disposeOrClear(lane, chunkKey);
 
             return;
         }
@@ -1015,10 +1351,13 @@ export class VoxelEditor {
             const y = (((i >> 8) & 3) << 2) | ((i >> 2) & 3);
             const z = (((i >> 6) & 3) << 2) | (i & 3);
 
-            // the Voxel colour from meta-data
-            this._scratchIndex.key = i;
-            const meta = chunk.getMetaData(this._scratchIndex) % PALETTE.length;
-            const rgb = PALETTE[meta].rgb;
+            // flat lane colour, or the Voxel colour from meta-data
+            let rgb = lane.color;
+
+            if (rgb === null) {
+                this._scratchIndex.key = i;
+                rgb = PALETTE[chunk.getMetaData(this._scratchIndex) % PALETTE.length].rgb;
+            }
 
             for (let face = 0; face < 6; face++) {
                 if (((mask >> face) & 1) === 0) {
@@ -1061,115 +1400,112 @@ export class VoxelEditor {
             }
         }
 
-        this._uploadMesh(chunkKey, mortonKey, positions, normals, colors, indices);
+        this._uploadMesh(lane, chunkKey, mortonKey, positions, normals, colors, indices);
     }
 
     /**
-     * Uploads a smooth mesh, colouring each vertex from the meta-data of the
-     * nearest solid BitVoxel of its source surface cell.
+     * Uploads a smooth mesh, colouring each vertex from the lane colour or from
+     * the meta-data of the nearest solid BitVoxel of its source surface cell.
      */
-    private _applySmoothMesh(chunkKey: number, vertices: Float32Array, normals: Float32Array, indices: Uint32Array): void {
+    private _applySmoothMesh(lane: MeshLane, chunkKey: number, vertices: Float32Array, normals: Float32Array, indices: Uint32Array): void {
         if (indices.length === 0) {
-            this._disposeOrClear(chunkKey);
+            this._disposeOrClear(lane, chunkKey);
 
             return;
         }
 
         const mortonKey = new MortonKey(chunkKey);
 
-        const chunkX = mortonKey.x * 16;
-        const chunkY = mortonKey.y * 16;
-        const chunkZ = mortonKey.z * 16;
-
         const vertexCount = vertices.length / 3;
         const colors = new Float32Array(vertexCount * 4);
 
-        for (let i = 0; i < vertexCount; i++) {
-            const read = i * 3;
+        if (lane.color !== null) {
+            // flat lane colour
+            const [r, g, b] = lane.color;
 
-            // the surface cell that owns this vertex (min-corner sample)
-            const px = vertices[read] / BIT_VOXEL_SIZE - 0.5;
-            const py = vertices[read + 1] / BIT_VOXEL_SIZE - 0.5;
-            const pz = vertices[read + 2] / BIT_VOXEL_SIZE - 0.5;
+            for (let i = 0; i < vertexCount; i++) {
+                const write = i * 4;
 
-            const cx = Math.floor(px);
-            const cy = Math.floor(py);
-            const cz = Math.floor(pz);
+                colors[write] = r;
+                colors[write + 1] = g;
+                colors[write + 2] = b;
+                colors[write + 3] = 1.0;
+            }
+        }
+        else {
+            const chunkX = mortonKey.x * 16;
+            const chunkY = mortonKey.y * 16;
+            const chunkZ = mortonKey.z * 16;
 
-            // pick the closest solid corner of the cell for the colour
-            let best = -1;
-            let bestDistance = Infinity;
+            for (let i = 0; i < vertexCount; i++) {
+                const read = i * 3;
 
-            for (let corner = 0; corner < 8; corner++) {
-                const dx = corner & 1;
-                const dy = (corner >> 1) & 1;
-                const dz = (corner >> 2) & 1;
+                // the surface cell that owns this vertex (min-corner sample)
+                const px = vertices[read] / BIT_VOXEL_SIZE - 0.5;
+                const py = vertices[read + 1] / BIT_VOXEL_SIZE - 0.5;
+                const pz = vertices[read + 2] / BIT_VOXEL_SIZE - 0.5;
 
-                const gx = chunkX + cx + dx;
-                const gy = chunkY + cy + dy;
-                const gz = chunkZ + cz + dz;
+                const cx = Math.floor(px);
+                const cy = Math.floor(py);
+                const cz = Math.floor(pz);
 
-                if (gx < 0 || gy < 0 || gz < 0 || this._getBitVoxelGlobal(gx, gy, gz) !== 1) {
-                    continue;
+                // pick the closest solid corner of the cell for the colour
+                let best = -1;
+                let bestDistance = Infinity;
+
+                for (let corner = 0; corner < 8; corner++) {
+                    const dx = corner & 1;
+                    const dy = (corner >> 1) & 1;
+                    const dz = (corner >> 2) & 1;
+
+                    const gx = chunkX + cx + dx;
+                    const gy = chunkY + cy + dy;
+                    const gz = chunkZ + cz + dz;
+
+                    if (gx < 0 || gy < 0 || gz < 0 || this._getBitVoxelAt(gx, gy, gz) !== 1) {
+                        continue;
+                    }
+
+                    const distance = ((px - (cx + dx)) ** 2) + ((py - (cy + dy)) ** 2) + ((pz - (cz + dz)) ** 2);
+
+                    if (distance < bestDistance) {
+                        bestDistance = distance;
+                        best = corner;
+                    }
                 }
 
-                const distance = ((px - (cx + dx)) ** 2) + ((py - (cy + dy)) ** 2) + ((pz - (cz + dz)) ** 2);
+                let rgb = PALETTE[0].rgb;
 
-                if (distance < bestDistance) {
-                    bestDistance = distance;
-                    best = corner;
+                if (best >= 0) {
+                    const meta = this._getMetaAt(chunkX + cx + (best & 1), chunkY + cy + ((best >> 1) & 1), chunkZ + cz + ((best >> 2) & 1));
+                    rgb = PALETTE[(meta ?? 0) % PALETTE.length].rgb;
                 }
+
+                const write = i * 4;
+
+                colors[write] = rgb[0];
+                colors[write + 1] = rgb[1];
+                colors[write + 2] = rgb[2];
+                colors[write + 3] = 1.0;
             }
-
-            let rgb = PALETTE[0].rgb;
-
-            if (best >= 0) {
-                const meta = this._getMetaGlobal(chunkX + cx + (best & 1), chunkY + cy + ((best >> 1) & 1), chunkZ + cz + ((best >> 2) & 1));
-                rgb = PALETTE[(meta ?? 0) % PALETTE.length].rgb;
-            }
-
-            const write = i * 4;
-
-            colors[write] = rgb[0];
-            colors[write + 1] = rgb[1];
-            colors[write + 2] = rgb[2];
-            colors[write + 3] = 1.0;
         }
 
-        this._uploadMesh(chunkKey, mortonKey, vertices, normals, colors, indices);
+        this._uploadMesh(lane, chunkKey, mortonKey, vertices, normals, colors, indices);
     }
 
     /**
-     * Reads a BitVoxel state at global BitVoxel coordinates (unbounded).
+     * Creates or updates the renderable mesh for a chunk of the provided lane.
      */
-    private _getBitVoxelGlobal(x: number, y: number, z: number): number {
-        return this._getBitVoxelAt(x, y, z);
-    }
-
-    /**
-     * Reads Voxel meta-data at global BitVoxel coordinates (unbounded).
-     */
-    private _getMetaGlobal(x: number, y: number, z: number): number | null {
-        return this._getMetaAt(x, y, z);
-    }
-
-    /**
-     * Creates or updates the renderable mesh for a chunk.
-     */
-    private _uploadMesh(chunkKey: number, mortonKey: MortonKey, positions: Float32Array, normals: Float32Array, colors: Float32Array, indices: Uint32Array): void {
-        let mesh = this._meshes.get(chunkKey);
+    private _uploadMesh(lane: MeshLane, chunkKey: number, mortonKey: MortonKey, positions: Float32Array, normals: Float32Array, colors: Float32Array, indices: Uint32Array): void {
+        let mesh = lane.meshes.get(chunkKey);
 
         if (!mesh) {
-            mesh = new Mesh(`chunk-${chunkKey}`, this._scene);
+            mesh = new Mesh(`${lane.id}-${chunkKey}`, this._scene);
 
-            const material = new StandardMaterial(`chunk-mat-${chunkKey}`, this._scene);
-            material.diffuseColor = Color3.White();
-            material.specularColor = new Color3(0.04, 0.04, 0.05);
-
-            mesh.material = material;
+            mesh.material = lane.material;
             mesh.isPickable = false;
 
-            this._meshes.set(chunkKey, mesh);
+            lane.meshes.set(chunkKey, mesh);
         }
 
         mesh.position.set(mortonKey.x * 16 * BIT_VOXEL_SIZE, mortonKey.y * 16 * BIT_VOXEL_SIZE, mortonKey.z * 16 * BIT_VOXEL_SIZE);
@@ -1183,21 +1519,21 @@ export class VoxelEditor {
 
         data.applyToMesh(mesh, true);
 
-        this._triangles.set(chunkKey, indices.length / 3);
+        lane.triangles.set(chunkKey, indices.length / 3);
     }
 
     /**
      * Disposes the mesh of a chunk that no longer has visible geometry.
      */
-    private _disposeOrClear(chunkKey: number): void {
-        const mesh = this._meshes.get(chunkKey);
+    private _disposeOrClear(lane: MeshLane, chunkKey: number): void {
+        const mesh = lane.meshes.get(chunkKey);
 
         if (mesh) {
             mesh.dispose();
-            this._meshes.delete(chunkKey);
+            lane.meshes.delete(chunkKey);
         }
 
-        this._triangles.delete(chunkKey);
+        lane.triangles.delete(chunkKey);
     }
 
     // ------------------------------------------------------------------ cursor
@@ -1239,7 +1575,9 @@ export class VoxelEditor {
         const colors: Record<EditorTool, string> = {
             paint: "#6c8cff",
             erase: "#e8593f",
-            pick: "#f2a83b"
+            pick: "#f2a83b",
+            sand: "#e8c26f",
+            water: "#478fea"
         };
 
         this._cursorMaterial.emissiveColor = Color3.FromHexString(colors[this._tool]);
@@ -1248,12 +1586,21 @@ export class VoxelEditor {
     // ------------------------------------------------------------------- stats
 
     /**
-     * Publishes scene statistics to the UI.
+     * Publishes scene statistics to the UI. Unforced publishes are throttled so
+     * the running simulation does not spam React re-renders.
      */
-    private _publishStats(): void {
+    private _publishStats(force: boolean): void {
         if (!this.onStats) {
             return;
         }
+
+        const now = performance.now();
+
+        if (!force && now - this._statsTimer < 250) {
+            return;
+        }
+
+        this._statsTimer = now;
 
         let bitVoxels = 0;
         let chunks = 0;
@@ -1265,15 +1612,20 @@ export class VoxelEditor {
 
         let triangles = 0;
 
-        for (const count of this._triangles.values()) {
-            triangles += count;
+        for (const lane of this._lanes) {
+            for (const count of lane.triangles.values()) {
+                triangles += count;
+            }
         }
 
         this.onStats({
             chunks: chunks,
             bitVoxels: bitVoxels,
             triangles: triangles,
-            workers: this._pool.size
+            workers: this._pool.size,
+            sandGrains: this._sand.length,
+            waterGrains: this._water.length,
+            activeGrains: this._sand.activeCount + this._water.activeCount
         });
     }
 

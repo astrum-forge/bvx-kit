@@ -88,6 +88,32 @@ geometry.computeGeometry(chunk, world, 2);
 renderer.upload(geometry.vertices, geometry.normals, geometry.indices);
 ```
 
+## Physics Layers
+
+**`VoxelPhysics`** adds falling-grain simulation layers (sand, dirt, liquids) on top of the static base world, which acts as immovable collision geometry. Granular materials and liquids share one solver and differ only by parameters — diagonal sliding, lateral flow toward drop-offs, and relative density (denser grains sink through lighter ones, so sand falls through water while the water bubbles up). The simulation is entirely additive: the base engine carries zero cost when physics is not used, and a dormant simulation costs nanoseconds per update.
+
+The application drives the simulation through an explicit update hook and remeshes only what moved:
+
+```typescript
+import { VoxelPhysics } from '@astrumforge/bvx-kit';
+
+const physics = new VoxelPhysics(world, { maxX: 127, maxY: 127, maxZ: 127 });
+const sand = physics.addLayer(VoxelPhysics.SAND);
+const water = physics.addLayer(VoxelPhysics.WATER);
+
+sand.set(10, 40, 10); // drop a grain of sand (global BitVoxel coordinates)
+
+// inside the application's update loop:
+physics.update();
+
+// each layer's world renders and serializes like any other VoxelWorld
+for (const chunkKey of sand.drainDirtyChunks()) {
+  remesh(sand.world, chunkKey);
+}
+```
+
+Grains that cannot move go dormant and cost nothing until a nearby cell changes — pools of water settle completely and re-level automatically when disturbed. After editing the base world, call `physics.wakeRegion(...)` so resting grains re-evaluate their support.
+
 ## Serialization
 
 **`BVXSerializer`** provides compact, versioned binary serialization for single chunks or entire worlds. Saving returns the binary data and loading accepts the binary data — where the bytes are stored (file, network, IndexedDB) is application logic. BitVoxel layers and meta-data are run-length encoded when that is smaller than the raw payload:

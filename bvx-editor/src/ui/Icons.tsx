@@ -99,3 +99,43 @@ export const SparkleIcon = ({ size = 18 }: IconProps) => (
         <path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z" />
     </svg>
 );
+
+export const SandIcon = ({ size = 18 }: IconProps) => (
+    <svg {...svgProps(size)}>
+        <path d="M6 3h12" />
+        <path d="M6 21h12" />
+        <path d="M7 3v3.5c0 2.5 5 4 5 5.5s-5 3-5 5.5V21" />
+        <path d="M17 3v3.5c0 2.5-5 4-5 5.5s5 3 5 5.5V21" />
+        <path d="M9.5 19.5h5" />
+    </svg>
+);
+
+export const WaterIcon = ({ size = 18 }: IconProps) => (
+    <svg {...svgProps(size)}>
+        <path d="M12 3s6 6.6 6 11a6 6 0 0 1-12 0c0-4.4 6-11 6-11z" />
+        <path d="M9.5 14.5a2.5 2.5 0 0 0 2.5 2.5" />
+    </svg>
+);
+
+export const PlayIcon = ({ size = 18 }: IconProps) => (
+    <svg {...svgProps(size)}>
+        <path d="M7 4.5l12 7.5-12 7.5V4.5z" />
+    </svg>
+);
+
+export const PauseIcon = ({ size = 18 }: IconProps) => (
+    <svg {...svgProps(size)}>
+        <path d="M7 4.5v15" />
+        <path d="M17 4.5v15" />
+    </svg>
+);
+
+export const TrashIcon = ({ size = 18 }: IconProps) => (
+    <svg {...svgProps(size)}>
+        <path d="M3 6h18" />
+        <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+        <path d="M10 11v6" />
+        <path d="M14 11v6" />
+    </svg>
+);

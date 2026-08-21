@@ -216,6 +216,78 @@ body {
     border-radius: 3px;
 }
 
+.rail-button.sand.active {
+    background: rgba(232, 194, 111, 0.16);
+    color: #e8c26f;
+    border-color: rgba(232, 194, 111, 0.4);
+}
+
+.rail-button.water.active {
+    background: rgba(71, 143, 234, 0.16);
+    color: #478fea;
+    border-color: rgba(71, 143, 234, 0.4);
+}
+
+/* physics panel */
+
+.physics-controls {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.physics-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    flex: 1;
+    height: 32px;
+    background: var(--bg);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-small);
+    font-size: 12.5px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.physics-toggle:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+}
+
+.physics-toggle.playing {
+    background: rgba(77, 158, 95, 0.14);
+    color: #6fce85;
+    border-color: rgba(77, 158, 95, 0.4);
+}
+
+.physics-clear {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: var(--bg);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-small);
+    cursor: pointer;
+    transition: color 120ms ease, border-color 120ms ease;
+}
+
+.physics-clear:hover {
+    color: var(--danger);
+    border-color: rgba(232, 89, 63, 0.4);
+}
+
+.physics-controls + .stats {
+    margin-bottom: 10px;
+}
+
 /* -------------------------------------------------------------- viewport */
 
 .viewport {
