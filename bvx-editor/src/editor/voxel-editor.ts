@@ -2,10 +2,10 @@ import {
     ArcRotateCamera,
     Color3,
     Color4,
+    ColorCurves,
     DefaultRenderingPipeline,
     DirectionalLight,
     Engine,
-    FresnelParameters,
     HemisphericLight,
     Matrix,
     Mesh,
@@ -16,6 +16,7 @@ import {
     Vector3,
     VertexData
 } from "@babylonjs/core";
+import { GhibliToonPlugin, GhibliWaterPlugin, createSky } from "./ghibli";
 import {
     BVXSerializer,
     MortonKey,
@@ -199,6 +200,9 @@ export class VoxelEditor {
     private readonly _resizeObserver: ResizeObserver;
     private _shadows!: ShadowGenerator;
 
+    // direction toward the sun - drives the water glints and the sky dome
+    private _sunDirection!: Vector3;
+
     // manual camera navigation state
     private _navMode: "none" | "orbit" | "pan" = "none";
     private _navPointerId = -1;
@@ -292,7 +296,7 @@ export class VoxelEditor {
         // right-handed to match the counter-clockwise outward winding produced
         // by the bvx-kit geometry generators with flipped = false
         scene.useRightHandedSystem = true;
-        scene.clearColor = Color4.FromHexString("#14161bff");
+        scene.clearColor = Color4.FromHexString("#bfdcecff");
 
         // orbit camera - all navigation input is handled manually (see the
         // pointer/wheel handlers) so mouse and trackpad devices both get
@@ -303,21 +307,27 @@ export class VoxelEditor {
         this._camera = new ArcRotateCamera("camera", -Math.PI / 3, Math.PI / 3, regionUnits * 1.1, target, scene);
         this._camera.minZ = 0.05;
 
-        // lighting - a soft ambient dome, a warm shadow-casting key light and a
-        // faint cool fill from the opposite side
+        // lighting - a blue sky dome with warm ground bounce, a warm
+        // shadow-casting sun and a faint cool fill from the opposite side. The
+        // toon ramps in the Ghibli plugins are tuned to this rig's intensities.
         const ambient = new HemisphericLight("ambient", new Vector3(0.2, 1.0, 0.3), scene);
-        ambient.intensity = 0.5;
-        ambient.groundColor = new Color3(0.2, 0.22, 0.28);
+        ambient.intensity = 0.55;
+        ambient.diffuse = new Color3(0.68, 0.80, 0.95);
+        ambient.groundColor = new Color3(0.50, 0.47, 0.38);
+        ambient.specular = Color3.Black();
 
         const key = new DirectionalLight("key", new Vector3(-0.55, -0.8, -0.35), scene);
-        key.intensity = 1.0;
-        key.diffuse = new Color3(1.0, 0.96, 0.9);
+        key.intensity = 1.15;
+        key.diffuse = new Color3(1.0, 0.94, 0.78);
         key.position = new Vector3(regionUnits * 1.2, regionUnits * 1.6, regionUnits * 1.1);
 
         const fill = new DirectionalLight("fill", new Vector3(0.6, -0.25, 0.5), scene);
-        fill.intensity = 0.18;
-        fill.diffuse = new Color3(0.7, 0.8, 1.0);
+        fill.intensity = 0.12;
+        fill.diffuse = new Color3(0.55, 0.65, 0.90);
         fill.specular = Color3.Black();
+
+        // direction toward the sun, shared by the water glints and the sky
+        this._sunDirection = key.direction.negate().normalize();
 
         // soft (PCF) shadows from the key light
         this._shadows = new ShadowGenerator(2048, key);
@@ -326,33 +336,50 @@ export class VoxelEditor {
         this._shadows.bias = 0.0008;
         this._shadows.normalBias = 0.02;
 
-        // a matte ground plane anchors the scene and catches shadows
-        const ground = MeshBuilder.CreateGround("ground", { width: regionUnits * 4, height: regionUnits * 4 }, scene);
+        // a soft meadow ground plane anchors the scene and catches shadows,
+        // shaded with the same toon ramp as the voxels
+        const ground = MeshBuilder.CreateGround("ground", { width: regionUnits * 6, height: regionUnits * 6 }, scene);
         ground.position.set(regionUnits / 2, -0.02, regionUnits / 2);
         ground.isPickable = false;
         ground.receiveShadows = true;
 
         const groundMaterial = new StandardMaterial("ground-mat", scene);
-        groundMaterial.diffuseColor = Color3.FromHexString("#181b21");
+        groundMaterial.diffuseColor = Color3.FromHexString("#94bd72");
         groundMaterial.specularColor = Color3.Black();
         ground.material = groundMaterial;
 
-        // subtle linear distance fog toward the background colour, starting
-        // well beyond the editable region
+        new GhibliToonPlugin(groundMaterial);
+
+        // the gradient sky dome with drifting clouds and the sun
+        createSky(scene, new Vector3(regionUnits / 2, 0, regionUnits / 2), this._sunDirection);
+
+        // soft atmospheric haze toward the horizon colour, starting well
+        // beyond the editable region
         scene.fogMode = Scene.FOGMODE_LINEAR;
         scene.fogStart = regionUnits * 2.5;
         scene.fogEnd = regionUnits * 6;
-        scene.fogColor = Color3.FromHexString("#14161b");
+        scene.fogColor = Color3.FromHexString("#dfe8dd");
 
-        // post-processing - anti-aliasing, a touch of contrast and a vignette
+        // post-processing - anti-aliasing, gentle contrast/saturation, a soft
+        // bloom for the water glints and a light vignette
         const pipeline = new DefaultRenderingPipeline("post", false, scene, [this._camera]);
         pipeline.fxaaEnabled = true;
+        pipeline.bloomEnabled = true;
+        pipeline.bloomThreshold = 0.85;
+        pipeline.bloomWeight = 0.18;
+        pipeline.bloomKernel = 48;
+        pipeline.bloomScale = 0.5;
         pipeline.imageProcessingEnabled = true;
-        pipeline.imageProcessing.contrast = 1.08;
-        pipeline.imageProcessing.exposure = 1.0;
+        pipeline.imageProcessing.contrast = 1.06;
+        pipeline.imageProcessing.exposure = 1.02;
         pipeline.imageProcessing.vignetteEnabled = true;
-        pipeline.imageProcessing.vignetteWeight = 1.4;
+        pipeline.imageProcessing.vignetteWeight = 1.1;
         pipeline.imageProcessing.vignetteColor = new Color4(0, 0, 0, 0);
+
+        const curves = new ColorCurves();
+        curves.globalSaturation = 18;
+        pipeline.imageProcessing.colorCurvesEnabled = true;
+        pipeline.imageProcessing.colorCurves = curves;
 
         this._buildGrid();
 
@@ -654,14 +681,21 @@ export class VoxelEditor {
     }
 
     /**
-     * Generates a small demo landscape to explore the editor with.
+     * Generates a small demo landscape to explore the editor with - rolling
+     * terrain with sandy shores, a lake in the valleys and floating islands.
      */
     public demoScene(): void {
         const world = new VoxelWorld();
         const chunks = new Map<number, VoxelChunk16>();
         const index = this._scratchIndex;
 
-        // gentle rolling terrain with height-banded colours
+        // the lake fills the valleys up to this height
+        const waterLevel = 8;
+
+        const heights = new Int16Array(REGION * REGION);
+
+        // gentle rolling terrain with height-banded colours - sand around the
+        // waterline, grass above, stone and snow on the peaks
         for (let x = 0; x < REGION; x++) {
             for (let z = 0; z < REGION; z++) {
                 const nx = x / REGION;
@@ -673,8 +707,10 @@ export class VoxelEditor {
                     (Math.sin((nx + nz) * Math.PI * 5.7) * 2.5)
                 ));
 
+                heights[(x * REGION) + z] = height;
+
                 for (let y = 0; y < height && y < REGION; y++) {
-                    const colorIndex = y < 5 ? 8 : (y < 9 ? 7 : (y < 13 ? 6 : (y < 16 ? 0 : 1)));
+                    const colorIndex = y < waterLevel + 1 ? 5 : (y < 13 ? 6 : (y < 16 ? 7 : 1));
 
                     this._setBitVoxelInto(world, chunks, x, y, z, colorIndex, index);
                 }
@@ -703,6 +739,19 @@ export class VoxelEditor {
         }
 
         this._replaceWorld(world);
+
+        // fill the valleys with water grains up to the waterline - the
+        // physics settles them into a lake
+        for (let x = 0; x < REGION; x++) {
+            for (let z = 0; z < REGION; z++) {
+                for (let y = heights[(x * REGION) + z]; y < waterLevel; y++) {
+                    this._water.set(x, y, z);
+                }
+            }
+        }
+
+        this._drainPhysicsDirty();
+        this._publishStats(true);
     }
 
     /**
@@ -759,24 +808,20 @@ export class VoxelEditor {
         const material = new StandardMaterial(`lane-mat-${id}`, this._scene);
 
         material.diffuseColor = Color3.White();
-        material.specularColor = new Color3(0.04, 0.04, 0.05);
+        material.specularColor = Color3.Black();
         material.alpha = alpha;
 
-        // water - fresnel opacity (opaque at grazing angles, clearer face-on),
-        // a tight specular highlight and a faint deep-blue glow
+        // translucent lanes are water - the animated Ghibli water shader owns
+        // colour, waves, glints, foam and per-pixel opacity. The depth
+        // pre-pass keeps overlapping water faces from double-blending.
         if (alpha < 1.0) {
-            material.specularColor = new Color3(0.55, 0.6, 0.65);
-            material.specularPower = 128;
-            material.emissiveColor = new Color3(0.01, 0.04, 0.09);
+            material.needDepthPrePass = true;
 
-            const fresnel = new FresnelParameters();
-
-            fresnel.leftColor = Color3.White();
-            fresnel.rightColor = new Color3(0.4, 0.4, 0.4);
-            fresnel.power = 2;
-            fresnel.bias = 0.2;
-
-            material.opacityFresnelParameters = fresnel;
+            new GhibliWaterPlugin(material, this._sunDirection);
+        }
+        // opaque lanes (base voxels, sand) get the painterly toon ramp
+        else {
+            new GhibliToonPlugin(material);
         }
 
         return {
@@ -810,11 +855,11 @@ export class VoxelEditor {
         }
 
         const fineMesh = MeshBuilder.CreateLineSystem("grid-fine", { lines: fine }, scene);
-        fineMesh.color = Color3.FromHexString("#262a33");
+        fineMesh.color = Color3.FromHexString("#84ab66");
         fineMesh.isPickable = false;
 
         const strongMesh = MeshBuilder.CreateLineSystem("grid-strong", { lines: strong }, scene);
-        strongMesh.color = Color3.FromHexString("#3a4150");
+        strongMesh.color = Color3.FromHexString("#5e854a");
         strongMesh.isPickable = false;
     }
 
