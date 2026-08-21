@@ -2,13 +2,16 @@ import {
     ArcRotateCamera,
     Color3,
     Color4,
+    DefaultRenderingPipeline,
     DirectionalLight,
     Engine,
+    FresnelParameters,
     HemisphericLight,
     Matrix,
     Mesh,
     MeshBuilder,
     Scene,
+    ShadowGenerator,
     StandardMaterial,
     Vector3,
     VertexData
@@ -152,6 +155,36 @@ const FACE_NORMALS: number[][] = [
 ];
 
 /**
+ * The two tangent axes of each face (the axes the face spans), indexed by the
+ * VoxelFaceGeometry face bit index. Used by the ambient occlusion baking.
+ */
+const FACE_TANGENTS: number[][] = [
+    [1, 2], [1, 2], [0, 2], [0, 2], [0, 1], [0, 1]
+];
+
+/**
+ * Vertex brightness for the 4 baked ambient occlusion levels (0 = fully
+ * occluded corner, 3 = fully open).
+ */
+const AO_LEVELS: number[] = [0.55, 0.72, 0.86, 1.0];
+
+/**
+ * Occupancy buffer dimensions - one chunk plus a 1-cell border (18^3 cells,
+ * offset by +1 per axis).
+ */
+const OCC_DIMS = 18;
+const OCC_STRIDE_Y = OCC_DIMS;
+const OCC_STRIDE_Z = OCC_DIMS * OCC_DIMS;
+
+/**
+ * Camera limits.
+ */
+const CAMERA_MIN_RADIUS = 2;
+const CAMERA_MAX_RADIUS = REGION * BIT_VOXEL_SIZE * 4;
+const CAMERA_MIN_BETA = 0.05;
+const CAMERA_MAX_BETA = Math.PI - 0.05;
+
+/**
  * VoxelEditor owns the BabylonJS scene, the bvx-kit VoxelWorld, the physics
  * simulation and the meshing worker pool. It handles painting, erasing, colour
  * picking, sand/water simulation, undo/redo, save/load and keeps one
@@ -164,6 +197,17 @@ export class VoxelEditor {
     private readonly _camera: ArcRotateCamera;
     private readonly _pool: MesherPool;
     private readonly _resizeObserver: ResizeObserver;
+    private _shadows!: ShadowGenerator;
+
+    // manual camera navigation state
+    private _navMode: "none" | "orbit" | "pan" = "none";
+    private _navPointerId = -1;
+    private _navLastX = 0;
+    private _navLastY = 0;
+    private _trackpadUntil = 0;
+
+    // camera framing glide (F key)
+    private _cameraGoal: { target: Vector3, radius: number } | null = null;
 
     private _world: VoxelWorld = new VoxelWorld();
 
@@ -191,6 +235,12 @@ export class VoxelEditor {
     private _strokeActive = false;
     private _lastStrokeCell: [number, number, number] | null = null;
 
+    // the plane the active stroke is locked to. Captured from the face hit on
+    // pointer-down so drag-painting stays on that surface instead of stacking
+    // toward the camera - the paint-brush behaviour.
+    private _strokePlaneAxis = 1;
+    private _strokePlaneCoord = 0;
+
     // editor settings
     private _tool: EditorTool = "paint";
     private _brushSize = 1;
@@ -207,8 +257,14 @@ export class VoxelEditor {
     private readonly _scratchIndex = new VoxelIndex();
     private readonly _scratchDirty = new Set<number>();
 
-    // throttled stats publishing
+    // reusable occupancy buffer for ambient occlusion baking - one chunk plus a
+    // 1-cell border, holding the union of base world and sand occupancy
+    private readonly _occupancy = new Uint8Array(OCC_DIMS * OCC_DIMS * OCC_DIMS);
+
+    // throttled stats publishing - _statsDirty marks a dropped publish that the
+    // render loop flushes once the throttle window has passed
     private _statsTimer = 0;
+    private _statsDirty = false;
 
     /**
      * Invoked whenever the scene statistics change.
@@ -238,29 +294,65 @@ export class VoxelEditor {
         scene.useRightHandedSystem = true;
         scene.clearColor = Color4.FromHexString("#14161bff");
 
-        // orbit camera - rotate on middle/right drag, left button is for painting
+        // orbit camera - all navigation input is handled manually (see the
+        // pointer/wheel handlers) so mouse and trackpad devices both get
+        // predictable, production-grade controls
         const regionUnits = REGION * BIT_VOXEL_SIZE;
         const target = new Vector3(regionUnits / 2, regionUnits / 8, regionUnits / 2);
 
         this._camera = new ArcRotateCamera("camera", -Math.PI / 3, Math.PI / 3, regionUnits * 1.1, target, scene);
-        this._camera.attachControl(canvas, true);
-        this._camera.wheelDeltaPercentage = 0.02;
-        this._camera.panningSensibility = 90;
-        this._camera.lowerRadiusLimit = 2;
-        this._camera.upperRadiusLimit = regionUnits * 4;
-        this._camera.upperBetaLimit = Math.PI - 0.05;
         this._camera.minZ = 0.05;
 
-        const pointers = this._camera.inputs.attached["pointers"] as unknown as { buttons: number[] };
-        pointers.buttons = [1, 2];
-
-        // lighting - a soft ambient dome plus a key light
+        // lighting - a soft ambient dome, a warm shadow-casting key light and a
+        // faint cool fill from the opposite side
         const ambient = new HemisphericLight("ambient", new Vector3(0.2, 1.0, 0.3), scene);
-        ambient.intensity = 0.55;
-        ambient.groundColor = new Color3(0.22, 0.24, 0.3);
+        ambient.intensity = 0.5;
+        ambient.groundColor = new Color3(0.2, 0.22, 0.28);
 
         const key = new DirectionalLight("key", new Vector3(-0.55, -0.8, -0.35), scene);
-        key.intensity = 0.85;
+        key.intensity = 1.0;
+        key.diffuse = new Color3(1.0, 0.96, 0.9);
+        key.position = new Vector3(regionUnits * 1.2, regionUnits * 1.6, regionUnits * 1.1);
+
+        const fill = new DirectionalLight("fill", new Vector3(0.6, -0.25, 0.5), scene);
+        fill.intensity = 0.18;
+        fill.diffuse = new Color3(0.7, 0.8, 1.0);
+        fill.specular = Color3.Black();
+
+        // soft (PCF) shadows from the key light
+        this._shadows = new ShadowGenerator(2048, key);
+        this._shadows.usePercentageCloserFiltering = true;
+        this._shadows.filteringQuality = ShadowGenerator.QUALITY_MEDIUM;
+        this._shadows.bias = 0.0008;
+        this._shadows.normalBias = 0.02;
+
+        // a matte ground plane anchors the scene and catches shadows
+        const ground = MeshBuilder.CreateGround("ground", { width: regionUnits * 4, height: regionUnits * 4 }, scene);
+        ground.position.set(regionUnits / 2, -0.02, regionUnits / 2);
+        ground.isPickable = false;
+        ground.receiveShadows = true;
+
+        const groundMaterial = new StandardMaterial("ground-mat", scene);
+        groundMaterial.diffuseColor = Color3.FromHexString("#181b21");
+        groundMaterial.specularColor = Color3.Black();
+        ground.material = groundMaterial;
+
+        // subtle linear distance fog toward the background colour, starting
+        // well beyond the editable region
+        scene.fogMode = Scene.FOGMODE_LINEAR;
+        scene.fogStart = regionUnits * 2.5;
+        scene.fogEnd = regionUnits * 6;
+        scene.fogColor = Color3.FromHexString("#14161b");
+
+        // post-processing - anti-aliasing, a touch of contrast and a vignette
+        const pipeline = new DefaultRenderingPipeline("post", false, scene, [this._camera]);
+        pipeline.fxaaEnabled = true;
+        pipeline.imageProcessingEnabled = true;
+        pipeline.imageProcessing.contrast = 1.08;
+        pipeline.imageProcessing.exposure = 1.0;
+        pipeline.imageProcessing.vignetteEnabled = true;
+        pipeline.imageProcessing.vignetteWeight = 1.4;
+        pipeline.imageProcessing.vignetteColor = new Color4(0, 0, 0, 0);
 
         this._buildGrid();
 
@@ -276,25 +368,37 @@ export class VoxelEditor {
         this._cursorMaterial = new StandardMaterial("cursor-mat", scene);
         this._cursorMaterial.emissiveColor = Color3.FromHexString("#6c8cff");
         this._cursorMaterial.disableLighting = true;
-        this._cursorMaterial.alpha = 0.35;
+        this._cursorMaterial.alpha = 0.22;
 
         this._cursor = MeshBuilder.CreateBox("cursor", { size: 1 }, scene);
         this._cursor.material = this._cursorMaterial;
         this._cursor.isPickable = false;
         this._cursor.isVisible = false;
+        this._cursor.enableEdgesRendering();
+        this._cursor.edgesWidth = 1.5;
+        this._cursor.edgesColor = Color4.FromHexString("#6c8cffff");
 
-        // pointer handling for painting
+        // pointer handling for painting and navigation
         canvas.addEventListener("pointerdown", this._onPointerDown);
         canvas.addEventListener("pointermove", this._onPointerMove);
         canvas.addEventListener("pointerup", this._onPointerUp);
         canvas.addEventListener("pointerleave", this._onPointerLeave);
         canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+        canvas.addEventListener("wheel", this._onWheel, { passive: false });
 
         this._resizeObserver = new ResizeObserver(() => this._engine.resize());
         this._resizeObserver.observe(canvas);
 
-        // fixed-step physics driven by the render loop
-        scene.onBeforeRenderObservable.add(() => this._updatePhysics());
+        // fixed-step physics, camera framing glide and stale-stats flushing
+        // driven by the render loop
+        scene.onBeforeRenderObservable.add(() => {
+            this._updateCameraGoal();
+            this._updatePhysics();
+
+            if (this._statsDirty && performance.now() - this._statsTimer >= 250) {
+                this._publishStats(true);
+            }
+        });
 
         this._engine.runRenderLoop(() => scene.render());
     }
@@ -639,6 +743,7 @@ export class VoxelEditor {
         this._canvas.removeEventListener("pointermove", this._onPointerMove);
         this._canvas.removeEventListener("pointerup", this._onPointerUp);
         this._canvas.removeEventListener("pointerleave", this._onPointerLeave);
+        this._canvas.removeEventListener("wheel", this._onWheel);
 
         this._resizeObserver.disconnect();
         this._pool.dispose();
@@ -654,8 +759,25 @@ export class VoxelEditor {
         const material = new StandardMaterial(`lane-mat-${id}`, this._scene);
 
         material.diffuseColor = Color3.White();
-        material.specularColor = alpha < 1.0 ? new Color3(0.25, 0.28, 0.32) : new Color3(0.04, 0.04, 0.05);
+        material.specularColor = new Color3(0.04, 0.04, 0.05);
         material.alpha = alpha;
+
+        // water - fresnel opacity (opaque at grazing angles, clearer face-on),
+        // a tight specular highlight and a faint deep-blue glow
+        if (alpha < 1.0) {
+            material.specularColor = new Color3(0.55, 0.6, 0.65);
+            material.specularPower = 128;
+            material.emissiveColor = new Color3(0.01, 0.04, 0.09);
+
+            const fresnel = new FresnelParameters();
+
+            fresnel.leftColor = Color3.White();
+            fresnel.rightColor = new Color3(0.4, 0.4, 0.4);
+            fresnel.power = 2;
+            fresnel.bias = 0.2;
+
+            material.opacityFresnelParameters = fresnel;
+        }
 
         return {
             id: id,
@@ -710,6 +832,7 @@ export class VoxelEditor {
 
         for (const lane of this._lanes) {
             for (const mesh of lane.meshes.values()) {
+                this._shadows.removeShadowCaster(mesh);
                 mesh.dispose();
             }
 
@@ -742,6 +865,27 @@ export class VoxelEditor {
     // --------------------------------------------------------------- painting
 
     private readonly _onPointerDown = (event: PointerEvent): void => {
+        // navigation routing - right-drag or Alt/Option-drag orbits, middle-drag
+        // or Alt+Shift-drag pans. This works with mice and with Mac trackpads
+        // (Option + one-finger drag).
+        const orbit = event.button === 2 || (event.button === 0 && event.altKey && !event.shiftKey);
+        const pan = event.button === 1 || (event.button === 0 && event.altKey && event.shiftKey);
+
+        if (orbit || pan) {
+            event.preventDefault();
+
+            this._navMode = orbit ? "orbit" : "pan";
+            this._navPointerId = event.pointerId;
+            this._navLastX = event.clientX;
+            this._navLastY = event.clientY;
+            this._cameraGoal = null;
+            this._cursor.isVisible = false;
+
+            this._capturePointer(event.pointerId);
+
+            return;
+        }
+
         if (event.button !== 0) {
             return;
         }
@@ -761,13 +905,38 @@ export class VoxelEditor {
             return;
         }
 
-        // keep receiving move/up events while dragging outside the canvas -
-        // guarded as synthetic pointers can reject capture
-        try {
-            this._canvas.setPointerCapture(event.pointerId);
+        if (!target.brushCell) {
+            return;
         }
-        catch {
-            // ignore - painting still works without capture
+
+        this._capturePointer(event.pointerId);
+
+        // lock the stroke to the plane of the surface hit on pointer-down, so
+        // dragging paints along that surface instead of stacking toward the
+        // camera. Erase locks onto the hit cells, placement tools onto the
+        // adjacent cells.
+        if (target.pickCell) {
+            const reference = this._tool === "erase" ? target.pickCell : target.brushCell;
+            const other = this._tool === "erase" ? target.brushCell : target.pickCell;
+
+            // the face normal axis is the axis where hit and adjacent cell differ
+            let axis = 1;
+
+            for (let a = 0; a < 3; a++) {
+                if (reference[a] !== other[a]) {
+                    axis = a;
+
+                    break;
+                }
+            }
+
+            this._strokePlaneAxis = axis;
+            this._strokePlaneCoord = reference[axis];
+        }
+        else {
+            // ground plane fallback
+            this._strokePlaneAxis = 1;
+            this._strokePlaneCoord = 0;
         }
 
         // physics strokes are transient simulation state and not undo-tracked
@@ -777,28 +946,59 @@ export class VoxelEditor {
         this._strokeActive = true;
         this._lastStrokeCell = null;
 
-        if (target.brushCell) {
-            this._applyBrush(target.brushCell);
-        }
+        this._applyBrush(target.brushCell);
     };
 
     private readonly _onPointerMove = (event: PointerEvent): void => {
+        // camera navigation drag
+        if (this._navMode !== "none" && event.pointerId === this._navPointerId) {
+            const dx = event.clientX - this._navLastX;
+            const dy = event.clientY - this._navLastY;
+
+            this._navLastX = event.clientX;
+            this._navLastY = event.clientY;
+
+            if (this._navMode === "orbit") {
+                this._orbitCamera(dx, dy);
+            }
+            else {
+                this._panCamera(dx, dy);
+            }
+
+            return;
+        }
+
+        // while stroking, targets come from the locked stroke plane
+        if (this._strokeActive) {
+            const cell = this._resolvePlaneTarget(event);
+
+            this._updateCursor(cell);
+
+            if (cell) {
+                const last = this._lastStrokeCell;
+
+                // only re-apply when the brush has moved to a new cell
+                if (!last || last[0] !== cell[0] || last[1] !== cell[1] || last[2] !== cell[2]) {
+                    this._applyBrush(cell);
+                }
+            }
+
+            return;
+        }
+
         const target = this._resolveTarget(event);
 
         this._updateCursor(this._tool === "pick" ? target.pickCell : target.brushCell);
-
-        if (this._strokeActive && target.brushCell) {
-            const last = this._lastStrokeCell;
-            const cell = target.brushCell;
-
-            // only re-apply when the brush has moved to a new cell
-            if (!last || last[0] !== cell[0] || last[1] !== cell[1] || last[2] !== cell[2]) {
-                this._applyBrush(cell);
-            }
-        }
     };
 
     private readonly _onPointerUp = (event: PointerEvent): void => {
+        if (this._navMode !== "none" && event.pointerId === this._navPointerId) {
+            this._navMode = "none";
+            this._navPointerId = -1;
+
+            return;
+        }
+
         if (event.button !== 0) {
             return;
         }
@@ -831,6 +1031,215 @@ export class VoxelEditor {
     private readonly _onPointerLeave = (): void => {
         this._cursor.isVisible = false;
     };
+
+    /**
+     * Wheel/scroll navigation. Classic mouse wheels zoom. Mac trackpads orbit
+     * with two-finger scroll, zoom with pinch (delivered as ctrl+wheel) and pan
+     * with shift+scroll. Trackpads are recognised by their event signature
+     * (horizontal deltas or fine-grained vertical deltas) with a sticky window
+     * so fast flings keep routing to orbit.
+     */
+    private readonly _onWheel = (event: WheelEvent): void => {
+        event.preventDefault();
+
+        this._cameraGoal = null;
+
+        // pinch-zoom gestures arrive as wheel events with ctrlKey set
+        if (event.ctrlKey || event.metaKey) {
+            this._zoomCamera(event.deltaY * 3);
+
+            return;
+        }
+
+        if (event.shiftKey) {
+            this._panCamera(-event.deltaX * 0.6, -event.deltaY * 0.6);
+
+            return;
+        }
+
+        // trackpad signature - pixel-mode deltas that are horizontal, fractional
+        // or small. Detection is sticky for a moment so vertical flings with
+        // large deltas keep orbiting.
+        const now = performance.now();
+
+        if (event.deltaMode === 0 && (event.deltaX !== 0 || !Number.isInteger(event.deltaY) || Math.abs(event.deltaY) < 40)) {
+            this._trackpadUntil = now + 1500;
+        }
+
+        if (now < this._trackpadUntil) {
+            this._orbitCamera(-event.deltaX * 0.75, -event.deltaY * 0.75);
+
+            return;
+        }
+
+        this._zoomCamera(event.deltaY);
+    };
+
+    /**
+     * Requests pointer capture, guarded as synthetic pointers can reject it.
+     */
+    private _capturePointer(pointerId: number): void {
+        try {
+            this._canvas.setPointerCapture(pointerId);
+        }
+        catch {
+            // ignore - input still works without capture
+        }
+    }
+
+    /**
+     * Orbits the camera by the provided pointer deltas (pixels).
+     */
+    private _orbitCamera(dx: number, dy: number): void {
+        const camera = this._camera;
+
+        camera.alpha -= dx * 0.0075;
+        camera.beta = Math.min(CAMERA_MAX_BETA, Math.max(CAMERA_MIN_BETA, camera.beta - (dy * 0.0075)));
+    }
+
+    /**
+     * Pans the camera target in view space by the provided pointer deltas
+     * (pixels), scaled by the current zoom so panning feels constant on screen.
+     */
+    private _panCamera(dx: number, dy: number): void {
+        const camera = this._camera;
+        const scale = camera.radius * 0.0016;
+
+        const right = camera.getDirection(Vector3.Right());
+        const up = camera.getDirection(Vector3.Up());
+
+        camera.target.addInPlace(right.scale(-dx * scale)).addInPlace(up.scale(dy * scale));
+
+        // keep the target near the editable region so the camera cannot get lost
+        const units = REGION * BIT_VOXEL_SIZE;
+        const margin = units * 0.75;
+
+        camera.target.x = Math.min(units + margin, Math.max(-margin, camera.target.x));
+        camera.target.y = Math.min(units + margin, Math.max(-margin, camera.target.y));
+        camera.target.z = Math.min(units + margin, Math.max(-margin, camera.target.z));
+    }
+
+    /**
+     * Zooms the camera by the provided wheel delta.
+     */
+    private _zoomCamera(delta: number): void {
+        const camera = this._camera;
+        const clamped = Math.min(200, Math.max(-200, delta));
+
+        camera.radius = Math.min(CAMERA_MAX_RADIUS, Math.max(CAMERA_MIN_RADIUS, camera.radius * (1 + (clamped * 0.0012))));
+    }
+
+    /**
+     * Glides the camera to frame the scene contents (F key). Uses the bounds of
+     * every populated chunk, falling back to the editable region when empty.
+     */
+    public frameContent(): void {
+        const units = REGION * BIT_VOXEL_SIZE;
+
+        let minX = Infinity, minY = Infinity, minZ = Infinity;
+        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+        let any = false;
+
+        for (const lane of this._lanes) {
+            for (const chunk of lane.world().chunks.values()) {
+                const key = chunk.key;
+
+                minX = Math.min(minX, key.x * 4);
+                minY = Math.min(minY, key.y * 4);
+                minZ = Math.min(minZ, key.z * 4);
+                maxX = Math.max(maxX, (key.x + 1) * 4);
+                maxY = Math.max(maxY, (key.y + 1) * 4);
+                maxZ = Math.max(maxZ, (key.z + 1) * 4);
+                any = true;
+            }
+        }
+
+        if (!any) {
+            minX = 0; minY = 0; minZ = 0;
+            maxX = units; maxY = units / 4; maxZ = units;
+        }
+
+        const extent = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
+
+        this._cameraGoal = {
+            target: new Vector3((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2),
+            radius: Math.min(CAMERA_MAX_RADIUS, Math.max(CAMERA_MIN_RADIUS, extent * 1.6))
+        };
+    }
+
+    /**
+     * Advances the camera framing glide, if one is active.
+     */
+    private _updateCameraGoal(): void {
+        const goal = this._cameraGoal;
+
+        if (!goal) {
+            return;
+        }
+
+        const camera = this._camera;
+
+        // mutate the target in place - assigning a new vector goes through
+        // ArcRotateCamera.setTarget, which recomputes alpha/beta/radius and
+        // fights the glide
+        camera.target.copyFrom(Vector3.Lerp(camera.target, goal.target, 0.18));
+        camera.radius += (goal.radius - camera.radius) * 0.18;
+
+        if (camera.target.subtract(goal.target).lengthSquared() < 0.0004 && Math.abs(camera.radius - goal.radius) < 0.02) {
+            camera.target.copyFrom(goal.target);
+            camera.radius = goal.radius;
+            this._cameraGoal = null;
+        }
+    }
+
+    /**
+     * Resolves the pointer position onto the active stroke's locked plane,
+     * returning the brush cell there or null when the ray runs parallel or the
+     * cell is out of the region.
+     */
+    private _resolvePlaneTarget(event: PointerEvent): [number, number, number] | null {
+        const rect = this._canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+
+        const ray = this._scene.createPickingRay(x, y, Matrix.Identity(), this._camera);
+
+        // in BitVoxel space
+        const origin = [
+            ray.origin.x / BIT_VOXEL_SIZE,
+            ray.origin.y / BIT_VOXEL_SIZE,
+            ray.origin.z / BIT_VOXEL_SIZE
+        ];
+        const direction = [ray.direction.x, ray.direction.y, ray.direction.z];
+
+        const axis = this._strokePlaneAxis;
+        const coord = this._strokePlaneCoord;
+
+        if (Math.abs(direction[axis]) < 1e-8) {
+            return null;
+        }
+
+        // intersect with the plane through the locked cells' centers
+        const t = (coord + 0.5 - origin[axis]) / direction[axis];
+
+        if (t <= 0) {
+            return null;
+        }
+
+        const cell: [number, number, number] = [
+            Math.floor(origin[0] + (direction[0] * t)),
+            Math.floor(origin[1] + (direction[1] * t)),
+            Math.floor(origin[2] + (direction[2] * t))
+        ];
+
+        cell[axis] = coord;
+
+        if (cell[0] < 0 || cell[0] >= REGION || cell[1] < 0 || cell[1] >= REGION || cell[2] < 0 || cell[2] >= REGION) {
+            return null;
+        }
+
+        return cell;
+    }
 
     /**
      * Resolves the pointer position into brush/pick target cells by casting a
@@ -881,6 +1290,40 @@ export class VoxelEditor {
      */
     private _castRay(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number):
         { hit: boolean, cell: [number, number, number], prev: [number, number, number] } {
+
+        // clamp the ray to the editable region's bounding box so the traversal
+        // starts at the region instead of walking from the camera
+        let tEntry = 0;
+        let tExit = Infinity;
+
+        const origins = [ox, oy, oz];
+        const directions = [dx, dy, dz];
+
+        for (let a = 0; a < 3; a++) {
+            if (Math.abs(directions[a]) < 1e-9) {
+                if (origins[a] < -1 || origins[a] > REGION + 1) {
+                    return { hit: false, cell: [0, 0, 0], prev: [0, 0, 0] };
+                }
+
+                continue;
+            }
+
+            const t1 = (-1 - origins[a]) / directions[a];
+            const t2 = (REGION + 1 - origins[a]) / directions[a];
+
+            tEntry = Math.max(tEntry, Math.min(t1, t2));
+            tExit = Math.min(tExit, Math.max(t1, t2));
+        }
+
+        if (tEntry > tExit) {
+            return { hit: false, cell: [0, 0, 0], prev: [0, 0, 0] };
+        }
+
+        if (tEntry > 0) {
+            ox += dx * tEntry;
+            oy += dy * tEntry;
+            oz += dz * tEntry;
+        }
 
         let x = Math.floor(ox);
         let y = Math.floor(oy);
@@ -975,8 +1418,10 @@ export class VoxelEditor {
                     }
 
                     if (this._tool === "paint") {
-                        // never paint solid ground into a cell a grain occupies
-                        if (this._sand.get(x, y, z) === 1 || this._water.get(x, y, z) === 1) {
+                        // painting is purely additive - occupied cells (ground
+                        // or grains) are left untouched, so plane-locked
+                        // strokes passing under terrain change nothing there
+                        if (this._isSolidAt(x, y, z)) {
                             continue;
                         }
 
@@ -1174,14 +1619,7 @@ export class VoxelEditor {
 
             if (data === null) {
                 this._world.remove(mortonKey);
-
-                const mesh = this._baseLane.meshes.get(key);
-
-                if (mesh) {
-                    mesh.dispose();
-                    this._baseLane.meshes.delete(key);
-                    this._baseLane.triangles.delete(key);
-                }
+                this._disposeOrClear(this._baseLane, key);
             }
             else {
                 this._world.insert(BVXSerializer.loadChunk(data));
@@ -1237,13 +1675,7 @@ export class VoxelEditor {
 
         if (chunk === null) {
             // chunk no longer exists - drop its mesh
-            const mesh = lane.meshes.get(chunkKey);
-
-            if (mesh) {
-                mesh.dispose();
-                lane.meshes.delete(chunkKey);
-                lane.triangles.delete(chunkKey);
-            }
+            this._disposeOrClear(lane, chunkKey);
 
             return;
         }
@@ -1306,6 +1738,63 @@ export class VoxelEditor {
     }
 
     /**
+     * Fills the reusable occupancy buffer for the chunk at the provided key -
+     * the chunk's cells plus a 1-cell border, as the union of the base world
+     * and the sand layer. Used to bake per-vertex ambient occlusion.
+     */
+    private _buildOcclusion(mortonKey: MortonKey): Uint8Array {
+        const occupancy = this._occupancy;
+
+        occupancy.fill(0);
+
+        // gather the 3x3x3 neighbourhood of BitVoxel storages for both worlds
+        const baseElements: (Uint32Array | null)[] = [];
+        const sandElements: (Uint32Array | null)[] = [];
+
+        for (let ox = -1; ox <= 1; ox++) {
+            for (let oy = -1; oy <= 1; oy++) {
+                for (let oz = -1; oz <= 1; oz++) {
+                    MortonKey.from(mortonKey.x + ox, mortonKey.y + oy, mortonKey.z + oz, this._scratchKey);
+
+                    const baseChunk = this._world.get(this._scratchKey);
+                    const sandChunk = this._sand.world.get(this._scratchKey);
+
+                    baseElements.push(baseChunk !== null ? baseChunk.layer.bitArray.elements : null);
+                    sandElements.push(sandChunk !== null ? sandChunk.layer.bitArray.elements : null);
+                }
+            }
+        }
+
+        for (let x = -1; x <= 16; x++) {
+            const sx = (x >> 4) + 1;
+            const lx = x & 15;
+
+            for (let y = -1; y <= 16; y++) {
+                const sy = (y >> 4) + 1;
+                const ly = y & 15;
+
+                for (let z = -1; z <= 16; z++) {
+                    const slot = (sx * 9) + (sy * 3) + ((z >> 4) + 1);
+                    const lz = z & 15;
+
+                    const index = ((lx >> 2) << 10) | ((ly >> 2) << 8) | ((lz >> 2) << 6) | ((lx & 3) << 4) | ((ly & 3) << 2) | (lz & 3);
+                    const word = index >> 5;
+                    const mask = 1 << (index & 31);
+
+                    const base = baseElements[slot];
+                    const sand = sandElements[slot];
+
+                    if ((base !== null && (base[word] & mask) !== 0) || (sand !== null && (sand[word] & mask) !== 0)) {
+                        occupancy[(x + 1) + ((y + 1) * OCC_STRIDE_Y) + ((z + 1) * OCC_STRIDE_Z)] = 1;
+                    }
+                }
+            }
+        }
+
+        return occupancy;
+    }
+
+    /**
      * Builds a compact blocky mesh from the 6-bit face masks - one coloured quad
      * per visible BitVoxel face.
      */
@@ -1335,6 +1824,10 @@ export class VoxelEditor {
         const normals = new Float32Array(faceCount * 4 * 3);
         const colors = new Float32Array(faceCount * 4 * 4);
         const indices = new Uint32Array(faceCount * 6);
+
+        // baked corner ambient occlusion - skipped for translucent water
+        const occupancy = lane !== this._waterLane ? this._buildOcclusion(mortonKey) : null;
+        const cornerAO: number[] = [3, 3, 3, 3];
 
         let vertex = 0;
         let indexCount = 0;
@@ -1368,6 +1861,39 @@ export class VoxelEditor {
                 const normal = FACE_NORMALS[face];
                 const base = vertex;
 
+                // ambient occlusion per corner - each corner samples the two
+                // edge neighbours and the diagonal neighbour in the layer the
+                // face looks into
+                if (occupancy !== null) {
+                    const tangents = FACE_TANGENTS[face];
+                    const nx = x + normal[0];
+                    const ny = y + normal[1];
+                    const nz = z + normal[2];
+
+                    for (let c = 0; c < 4; c++) {
+                        const a1 = tangents[0];
+                        const a2 = tangents[1];
+                        const d1 = corners[c][a1] === 1 ? 1 : -1;
+                        const d2 = corners[c][a2] === 1 ? 1 : -1;
+
+                        const s1x = nx + (a1 === 0 ? d1 : 0);
+                        const s1y = ny + (a1 === 1 ? d1 : 0);
+                        const s1z = nz + (a1 === 2 ? d1 : 0);
+                        const s2x = nx + (a2 === 0 ? d2 : 0);
+                        const s2y = ny + (a2 === 1 ? d2 : 0);
+                        const s2z = nz + (a2 === 2 ? d2 : 0);
+
+                        const side1 = occupancy[(s1x + 1) + ((s1y + 1) * OCC_STRIDE_Y) + ((s1z + 1) * OCC_STRIDE_Z)];
+                        const side2 = occupancy[(s2x + 1) + ((s2y + 1) * OCC_STRIDE_Y) + ((s2z + 1) * OCC_STRIDE_Z)];
+                        const diagonal = occupancy[(s1x + s2x - nx + 1) + ((s1y + s2y - ny + 1) * OCC_STRIDE_Y) + ((s1z + s2z - nz + 1) * OCC_STRIDE_Z)];
+
+                        cornerAO[c] = (side1 !== 0 && side2 !== 0) ? 0 : 3 - (side1 + side2 + diagonal);
+                    }
+                }
+                else {
+                    cornerAO[0] = cornerAO[1] = cornerAO[2] = cornerAO[3] = 3;
+                }
+
                 for (let c = 0; c < 4; c++) {
                     const write = vertex * 3;
 
@@ -1379,22 +1905,35 @@ export class VoxelEditor {
                     normals[write + 1] = normal[1];
                     normals[write + 2] = normal[2];
 
+                    const brightness = AO_LEVELS[cornerAO[c]];
                     const colorWrite = vertex * 4;
 
-                    colors[colorWrite] = rgb[0];
-                    colors[colorWrite + 1] = rgb[1];
-                    colors[colorWrite + 2] = rgb[2];
+                    colors[colorWrite] = rgb[0] * brightness;
+                    colors[colorWrite + 1] = rgb[1] * brightness;
+                    colors[colorWrite + 2] = rgb[2] * brightness;
                     colors[colorWrite + 3] = 1.0;
 
                     vertex++;
                 }
 
-                indices[indexCount] = base;
-                indices[indexCount + 1] = base + 1;
-                indices[indexCount + 2] = base + 2;
-                indices[indexCount + 3] = base;
-                indices[indexCount + 4] = base + 2;
-                indices[indexCount + 5] = base + 3;
+                // split the quad along the diagonal that matches the occlusion
+                // gradient, avoiding the classic interpolation artifact
+                if (cornerAO[0] + cornerAO[2] < cornerAO[1] + cornerAO[3]) {
+                    indices[indexCount] = base + 1;
+                    indices[indexCount + 1] = base + 2;
+                    indices[indexCount + 2] = base + 3;
+                    indices[indexCount + 3] = base + 1;
+                    indices[indexCount + 4] = base + 3;
+                    indices[indexCount + 5] = base;
+                }
+                else {
+                    indices[indexCount] = base;
+                    indices[indexCount + 1] = base + 1;
+                    indices[indexCount + 2] = base + 2;
+                    indices[indexCount + 3] = base;
+                    indices[indexCount + 4] = base + 2;
+                    indices[indexCount + 5] = base + 3;
+                }
 
                 indexCount += 6;
             }
@@ -1419,16 +1958,48 @@ export class VoxelEditor {
         const vertexCount = vertices.length / 3;
         const colors = new Float32Array(vertexCount * 4);
 
+        // crevice ambient occlusion from the surrounding occupancy - skipped
+        // for translucent water
+        const occupancy = lane !== this._waterLane ? this._buildOcclusion(mortonKey) : null;
+
+        const creviceAO = (cx: number, cy: number, cz: number): number => {
+            if (occupancy === null) {
+                return 1.0;
+            }
+
+            // count the solid corners of the vertex's surface cell - the more
+            // enclosed the cell, the darker the vertex
+            let solid = 0;
+
+            for (let corner = 0; corner < 8; corner++) {
+                const sx = Math.min(16, Math.max(-1, cx + (corner & 1)));
+                const sy = Math.min(16, Math.max(-1, cy + ((corner >> 1) & 1)));
+                const sz = Math.min(16, Math.max(-1, cz + ((corner >> 2) & 1)));
+
+                solid += occupancy[(sx + 1) + ((sy + 1) * OCC_STRIDE_Y) + ((sz + 1) * OCC_STRIDE_Z)];
+            }
+
+            return 1.0 - (Math.max(0, solid - 2) * 0.05);
+        };
+
         if (lane.color !== null) {
-            // flat lane colour
+            // flat lane colour with crevice shading
             const [r, g, b] = lane.color;
 
             for (let i = 0; i < vertexCount; i++) {
+                const read = i * 3;
+
+                const ao = creviceAO(
+                    Math.floor(vertices[read] / BIT_VOXEL_SIZE - 0.5),
+                    Math.floor(vertices[read + 1] / BIT_VOXEL_SIZE - 0.5),
+                    Math.floor(vertices[read + 2] / BIT_VOXEL_SIZE - 0.5)
+                );
+
                 const write = i * 4;
 
-                colors[write] = r;
-                colors[write + 1] = g;
-                colors[write + 2] = b;
+                colors[write] = r * ao;
+                colors[write + 1] = g * ao;
+                colors[write + 2] = b * ao;
                 colors[write + 3] = 1.0;
             }
         }
@@ -1481,11 +2052,12 @@ export class VoxelEditor {
                     rgb = PALETTE[(meta ?? 0) % PALETTE.length].rgb;
                 }
 
+                const ao = creviceAO(cx, cy, cz);
                 const write = i * 4;
 
-                colors[write] = rgb[0];
-                colors[write + 1] = rgb[1];
-                colors[write + 2] = rgb[2];
+                colors[write] = rgb[0] * ao;
+                colors[write + 1] = rgb[1] * ao;
+                colors[write + 2] = rgb[2] * ao;
                 colors[write + 3] = 1.0;
             }
         }
@@ -1504,6 +2076,12 @@ export class VoxelEditor {
 
             mesh.material = lane.material;
             mesh.isPickable = false;
+            mesh.receiveShadows = true;
+
+            // translucent water does not cast shadows
+            if (lane !== this._waterLane) {
+                this._shadows.addShadowCaster(mesh);
+            }
 
             lane.meshes.set(chunkKey, mesh);
         }
@@ -1529,6 +2107,7 @@ export class VoxelEditor {
         const mesh = lane.meshes.get(chunkKey);
 
         if (mesh) {
+            this._shadows.removeShadowCaster(mesh);
             mesh.dispose();
             lane.meshes.delete(chunkKey);
         }
@@ -1581,6 +2160,7 @@ export class VoxelEditor {
         };
 
         this._cursorMaterial.emissiveColor = Color3.FromHexString(colors[this._tool]);
+        this._cursor.edgesColor = Color4.FromHexString(colors[this._tool] + "ff");
     }
 
     // ------------------------------------------------------------------- stats
@@ -1597,9 +2177,12 @@ export class VoxelEditor {
         const now = performance.now();
 
         if (!force && now - this._statsTimer < 250) {
+            this._statsDirty = true;
+
             return;
         }
 
+        this._statsDirty = false;
         this._statsTimer = now;
 
         let bitVoxels = 0;

@@ -14,15 +14,22 @@ A companion editor for the **[BitVoxel Engine](../bvx-kit/)** — paint and view
 
 ## Controls
 
+Strokes are **plane-locked**: on pointer-down the brush locks onto the plane of the surface you hit, and the whole drag paints along that surface — up walls, across floors, from any camera angle — instead of stacking voxels toward the camera.
+
 | Input | Action |
 | --- | --- |
 | Left-drag | Paint / erase / pour with the active tool |
-| Middle/Right-drag | Orbit the camera |
+| Right-drag or `⌥`+drag | Orbit the camera |
+| Middle-drag or `⌥⇧`+drag | Pan the camera |
 | Mouse wheel | Zoom |
+| Two-finger scroll (trackpad) | Orbit |
+| Pinch (trackpad) or `Ctrl`+wheel | Zoom |
+| `⇧`+scroll | Pan |
+| `F` | Frame the scene contents |
 | `B` / `E` / `I` | Paint / Erase / Pick tool |
 | `S` / `W` | Sand / Water tool |
 | `Space` | Play / pause the physics simulation |
-| `1` – `4` | Brush size |
+| `1` – `4`, `[` / `]` | Brush size |
 | `Tab` | Toggle blocky/smooth rendering |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / Redo |
 | `Ctrl+S` | Save scene |

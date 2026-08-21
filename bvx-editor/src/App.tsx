@@ -176,6 +176,9 @@ export const App = () => {
                 case "i": selectTool("pick"); break;
                 case "s": selectTool("sand"); break;
                 case "w": selectTool("water"); break;
+                case "f": editor.frameContent(); break;
+                case "[": selectBrushSize(editor.brushSize - 1); break;
+                case "]": selectBrushSize(editor.brushSize + 1); break;
                 case "1": case "2": case "3": case "4":
                     selectBrushSize(parseInt(event.key, 10));
                     break;
@@ -294,7 +297,7 @@ export const App = () => {
                 <main className="viewport">
                     <canvas ref={canvasRef} />
                     <div className="viewport-hint">
-                        Left-drag paint &nbsp;·&nbsp; Middle/Right-drag orbit &nbsp;·&nbsp; Wheel zoom
+                        Draw: left-drag &nbsp;·&nbsp; Orbit: right-drag / ⌥-drag / 2-finger scroll &nbsp;·&nbsp; Pan: middle-drag / ⌥⇧-drag &nbsp;·&nbsp; Zoom: wheel / pinch &nbsp;·&nbsp; Frame: F
                     </div>
                 </main>
 
@@ -386,8 +389,11 @@ export const App = () => {
                             <div><dt>B / E / I</dt><dd>Paint / Erase / Pick</dd></div>
                             <div><dt>S / W</dt><dd>Sand / Water</dd></div>
                             <div><dt>Space</dt><dd>Play / pause physics</dd></div>
-                            <div><dt>1 – 4</dt><dd>Brush size</dd></div>
+                            <div><dt>F</dt><dd>Frame the scene</dd></div>
+                            <div><dt>1 – 4, [ ]</dt><dd>Brush size</dd></div>
                             <div><dt>Tab</dt><dd>Toggle render mode</dd></div>
+                            <div><dt>⌥ drag</dt><dd>Orbit (trackpad)</dd></div>
+                            <div><dt>⌥⇧ drag</dt><dd>Pan (trackpad)</dd></div>
                             <div><dt>Ctrl+Z</dt><dd>Undo</dd></div>
                             <div><dt>Ctrl+Shift+Z</dt><dd>Redo</dd></div>
                             <div><dt>Ctrl+S</dt><dd>Save scene</dd></div>
