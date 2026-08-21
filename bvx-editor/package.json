@@ -1,0 +1,40 @@
+{
+  "name": "@astrumforge/bvx-editor",
+  "version": "0.0.1",
+  "description": "Companion editor for the BitVoxel Engine - paint and view BitVoxels with blocky and smooth rendering",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/astrum-forge/bvx-kit.git"
+  },
+  "engines": {
+    "node": ">=20.0"
+  },
+  "keywords": [
+    "voxels",
+    "voxel",
+    "bitvoxel",
+    "editor"
+  ],
+  "author": "David Arayan <david@astrumforge.com> (https://www.astrumforge.com)",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@astrumforge/bvx-kit": "file:../bvx-kit",
+    "@babylonjs/core": "^9.22.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.1.0",
+    "typescript": "^5.7.3",
+    "vite": "^8.2.2"
+  }
+}

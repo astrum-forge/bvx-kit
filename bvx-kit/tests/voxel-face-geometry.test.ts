@@ -176,4 +176,102 @@ describe('VoxelFaceGeometry', () => {
         // we expect a total of 48 sides to be rendered
         expect(geometry.popCount()).toEqual(48);
     })
+
+    it('.computeIndices() - randomized worlds match a reference implementation', () => {
+        // reference implementation of the +axis/-axis neighbour walk, used to
+        // verify that the optimised LUT-based computeIndices() produces
+        // identical output for arbitrary voxel configurations
+        const refIndex = new VoxelIndex();
+
+        const sample = (world: VoxelWorld, chunk: VoxelChunk32, index: VoxelIndex, axis: number, dir: number): number => {
+            const v: number[] = [index.vx, index.vy, index.vz];
+            const b: number[] = [index.bx, index.by, index.bz];
+
+            b[axis] += dir;
+
+            let target: VoxelChunk32 | null = chunk;
+
+            if (b[axis] > 3) {
+                b[axis] = 0;
+                v[axis] += 1;
+
+                if (v[axis] > 3) {
+                    v[axis] = 0;
+                    const nKey = axis === 0 ? chunk.key.clone().incX() : (axis === 1 ? chunk.key.clone().incY() : chunk.key.clone().incZ());
+                    target = world.get(nKey) as VoxelChunk32 | null;
+                }
+            }
+            else if (b[axis] < 0) {
+                b[axis] = 3;
+                v[axis] -= 1;
+
+                if (v[axis] < 0) {
+                    v[axis] = 3;
+                    const nKey = axis === 0 ? chunk.key.clone().decX() : (axis === 1 ? chunk.key.clone().decY() : chunk.key.clone().decZ());
+                    target = world.get(nKey) as VoxelChunk32 | null;
+                }
+            }
+
+            if (target === null) {
+                return 0;
+            }
+
+            return target.getBitVoxel(VoxelIndex.from(v[0], v[1], v[2], b[0], b[1], b[2], refIndex));
+        };
+
+        // deterministic pseudo-random generator so failures are reproducible
+        let seed = 12345;
+        const rand = (): number => {
+            seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF;
+            return seed / 0x7FFFFFFF;
+        };
+
+        const world = new VoxelWorld();
+        const chunks: VoxelChunk32[] = [];
+
+        // build a 2x2x2 block of chunks with random ~30% BitVoxel occupancy
+        for (let cx = 1; cx <= 2; cx++) {
+            for (let cy = 1; cy <= 2; cy++) {
+                for (let cz = 1; cz <= 2; cz++) {
+                    const chunk = new VoxelChunk32(MortonKey.from(cx, cy, cz));
+
+                    for (let i = 0; i < 4096; i++) {
+                        if (rand() < 0.3) {
+                            chunk.setBitVoxel(new VoxelIndex(i));
+                        }
+                    }
+
+                    world.insert(chunk);
+                    chunks.push(chunk);
+                }
+            }
+        }
+
+        const geometry = new VoxelFaceGeometry();
+        const queryIndex = new VoxelIndex();
+
+        for (const chunk of chunks) {
+            geometry.computeIndices(chunk, world);
+
+            for (let i = 0; i < 4096; i++) {
+                queryIndex.key = i;
+
+                if (chunk.getBitVoxel(queryIndex) === 0) {
+                    expect(geometry.indices[i]).toEqual(0);
+
+                    continue;
+                }
+
+                const expected =
+                    ((sample(world, chunk, queryIndex, 0, 1) ^ 1) << VoxelFaceGeometry.X_POS_INDEX) |
+                    ((sample(world, chunk, queryIndex, 0, -1) ^ 1) << VoxelFaceGeometry.X_NEG_INDEX) |
+                    ((sample(world, chunk, queryIndex, 1, 1) ^ 1) << VoxelFaceGeometry.Y_POS_INDEX) |
+                    ((sample(world, chunk, queryIndex, 1, -1) ^ 1) << VoxelFaceGeometry.Y_NEG_INDEX) |
+                    ((sample(world, chunk, queryIndex, 2, 1) ^ 1) << VoxelFaceGeometry.Z_POS_INDEX) |
+                    ((sample(world, chunk, queryIndex, 2, -1) ^ 1) << VoxelFaceGeometry.Z_NEG_INDEX);
+
+                expect(geometry.indices[i]).toEqual(expected);
+            }
+        }
+    });
 });

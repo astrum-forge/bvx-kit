@@ -67,9 +67,22 @@ export abstract class VoxelChunk {
     }
 
     /**
+     * Returns the number of meta-data bits stored per voxel in this chunk.
+     * This will be 0, 8, 16 or 32 depending on the concrete VoxelChunk type.
+     */
+    public abstract get metaBits(): number;
+
+    /**
+     * Returns the typed array view of the meta-data storage for this chunk,
+     * or null if this chunk does not store any meta-data. Useful for direct
+     * buffer access such as serialization or transfer between threads.
+     */
+    public abstract get metaData(): Uint8Array | Uint16Array | Uint32Array | null;
+
+    /**
      * Sets meta-data for a specific VoxelIndex in the chunk. This allows you to store
      * additional information about a voxel (e.g., properties, flags).
-     * 
+     *
      * @param key - The VoxelIndex identifying the voxel.
      * @param meta - The meta-data to associate with the voxel.
      */

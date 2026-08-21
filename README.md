@@ -52,13 +52,14 @@ npm install @astrumforge/bvx-kit
 Here’s how you can quickly set up **BitVoxel Engine** and start managing voxel chunks within a voxel world:
 
 ```typescript
-import { MortonKey, VoxelChunk, VoxelWorld } from '@astrumforge/bvx-kit';
+import { MortonKey, VoxelChunk, VoxelChunk32, VoxelWorld } from '@astrumforge/bvx-kit';
 
 // Create a new VoxelWorld instance
 const world: VoxelWorld = new VoxelWorld();
 
-// Create a new VoxelChunk at world position (x=1, y=1, z=1)
-const chunk: VoxelChunk = new VoxelChunk(MortonKey.from(1,1,1));
+// Create a new VoxelChunk with 32 bits of meta-data per voxel
+// at world position (x=1, y=1, z=1)
+const chunk: VoxelChunk = new VoxelChunk32(MortonKey.from(1,1,1));
 
 // Insert the chunk into the world
 world.insert(chunk);
@@ -70,6 +71,51 @@ if (prevChunk !== null) {
   // Do something with the VoxelChunk
 }
 ```
+
+## Smooth Rendering
+
+In addition to the blocky face geometry path (`VoxelFaceGeometry` + `BVXGeometry`), the engine provides **`VoxelSmoothGeometry`**, a Naive Surface Nets mesher that generates smooth, renderer-agnostic triangle meshes (positions, normals and indices) directly from BitVoxel data. Meshes are watertight across chunk seams and an optional smoothing parameter (0-3 field blur passes) produces progressively softer surfaces:
+
+```typescript
+import { VoxelSmoothGeometry } from '@astrumforge/bvx-kit';
+
+const geometry = new VoxelSmoothGeometry();
+
+// smoothing = 2 blur passes, default winding
+geometry.computeGeometry(chunk, world, 2);
+
+// upload to any renderer
+renderer.upload(geometry.vertices, geometry.normals, geometry.indices);
+```
+
+## Serialization
+
+**`BVXSerializer`** provides compact, versioned binary serialization for single chunks or entire worlds. Saving returns the binary data and loading accepts the binary data — where the bytes are stored (file, network, IndexedDB) is application logic. BitVoxel layers and meta-data are run-length encoded when that is smaller than the raw payload:
+
+```typescript
+import { BVXSerializer } from '@astrumforge/bvx-kit';
+
+const chunkBytes: Uint8Array = BVXSerializer.saveChunk(chunk);
+const worldBytes: Uint8Array = BVXSerializer.saveWorld(world);
+
+const loadedChunk = BVXSerializer.loadChunk(chunkBytes);
+const loadedWorld = BVXSerializer.loadWorld(worldBytes);
+```
+
+## Web Workers
+
+Geometry generation can be moved off the main thread with **`BVXMesher`** and **`BVXWorkerHost`**. The core stays platform-agnostic — your application provides a tiny worker entry file and posts `MesherRequest` messages built from serialized world snapshots. Geometry buffers are returned as transferables:
+
+```typescript
+// mesher.worker.ts - your application's worker entry
+import { BVXWorkerHost } from '@astrumforge/bvx-kit';
+
+new BVXWorkerHost().attach(self as never);
+```
+
+## BitVoxel Editor
+
+The repository contains a companion **[BitVoxel Editor](bvx-editor/)** — a browser-based editor built with React and BabylonJS for painting and viewing BitVoxels with both blocky and smooth rendering modes. The editor is fully separate from the engine (the engine remains renderer-agnostic) and doubles as a reference integration, including worker-pool meshing and `.bvx` save/load. See [bvx-editor/README.md](bvx-editor/README.md).
 
 ## Additional Resources
 

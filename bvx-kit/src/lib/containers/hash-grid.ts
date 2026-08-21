@@ -65,13 +65,25 @@ export class HashGrid<K extends Key, V> {
     }
 
     /**
+     * Calculates the bucket index for the provided key. The key is treated as
+     * an unsigned 32-bit integer to ensure the index is always in-range, even
+     * for Key implementations that produce negative encoded keys.
+     *
+     * @param key - The key used to determine the bucket index.
+     * @returns - The bucket index between 0 and size - 1 (inclusive).
+     */
+    private _GetBucketIndex(key: K): number {
+        return (key.key >>> 0) % this._size;
+    }
+
+    /**
      * Calculates and returns the appropriate bucket for the provided key.
-     * 
+     *
      * @param key - The key used to determine the bucket.
      * @returns - The array of Node objects in the bucket, or null if the bucket is empty.
      */
     private _GetKeyBucket(key: K): Node<V>[] | null {
-        const value: Node<V>[] | null | undefined = this._dict[key.key % this._size];
+        const value: Node<V>[] | null | undefined = this._dict[this._GetBucketIndex(key)];
         return value ? value : null;
     }
 
@@ -127,31 +139,103 @@ export class HashGrid<K extends Key, V> {
      * @param value - The value to associate with the key.
      */
     public set(key: K, value: V): void {
-        const node: Node<V> | null = this._Get(key);
+        const bucketKey: number = this._GetBucketIndex(key);
+        const bucket: Node<V>[] | undefined | null = this._dict[bucketKey];
 
-        // Insert a new key-value pair if the key doesn't exist
-        if (node === null) {
-            const bucketKey: number = key.key % this._size;
-            const bucket: Node<V>[] | undefined | null = this._dict[bucketKey];
+        // Create a new bucket and insert the node if the bucket doesn't exist
+        if (!bucket) {
+            this._dict[bucketKey] = new Array<Node<V>>(new Node<V>(key.key, value));
 
-            // Append to the bucket if it exists
-            if (bucket) {
-                bucket.push(new Node<V>(key.key, value));
-            }
-            else {
-                // Create a new bucket and insert the node
-                this._dict[bucketKey] = new Array<Node<V>>(new Node<V>(key.key, value));
+            return;
+        }
+
+        // Update the value if the key already exists in the bucket
+        const length: number = bucket.length;
+
+        for (let i = 0; i < length; i++) {
+            const node: Node<V> | undefined | null = bucket[i];
+
+            if (node && node.key === key.key) {
+                node.value = value;
+
+                return;
             }
         }
-        else {
-            // Update the value if the key already exists
-            node.value = value;
+
+        // Otherwise append a new key-value pair to the existing bucket
+        bucket.push(new Node<V>(key.key, value));
+    }
+
+    /**
+     * Returns the total number of key-value pairs stored in the hash grid.
+     * NOTE: This is an O(buckets) operation and should not be used in hot paths.
+     */
+    public get length(): number {
+        const dict: Node<V>[][] = this._dict;
+        const size: number = this._size;
+
+        let counter = 0;
+
+        for (let i = 0; i < size; i++) {
+            const bucket: Node<V>[] | undefined | null = dict[i];
+
+            if (bucket) {
+                counter += bucket.length;
+            }
+        }
+
+        return counter;
+    }
+
+    /**
+     * Iterates over all values stored in the hash grid. Iteration order is
+     * undefined and should not be relied upon.
+     *
+     * @returns - A generator that yields each stored value.
+     */
+    public *values(): Generator<V> {
+        const dict: Node<V>[][] = this._dict;
+        const size: number = this._size;
+
+        for (let i = 0; i < size; i++) {
+            const bucket: Node<V>[] | undefined | null = dict[i];
+
+            if (bucket) {
+                const length: number = bucket.length;
+
+                for (let j = 0; j < length; j++) {
+                    yield bucket[j].value;
+                }
+            }
+        }
+    }
+
+    /**
+     * Iterates over all encoded keys stored in the hash grid. Iteration order
+     * is undefined and should not be relied upon.
+     *
+     * @returns - A generator that yields each stored key (encoded as a number).
+     */
+    public *keys(): Generator<number> {
+        const dict: Node<V>[][] = this._dict;
+        const size: number = this._size;
+
+        for (let i = 0; i < size; i++) {
+            const bucket: Node<V>[] | undefined | null = dict[i];
+
+            if (bucket) {
+                const length: number = bucket.length;
+
+                for (let j = 0; j < length; j++) {
+                    yield bucket[j].key;
+                }
+            }
         }
     }
 
     /**
      * Removes the key-value pair associated with the given key, if it exists.
-     * 
+     *
      * @param key - The key to remove.
      * @returns - True if the key was found and removed, false otherwise.
      */

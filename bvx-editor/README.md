@@ -1,0 +1,49 @@
+# BitVoxel Editor
+
+A companion editor for the **[BitVoxel Engine](../bvx-kit/)** — paint and view BitVoxels in the browser with both **blocky** and **smooth** rendering modes. Built with **React** and **BabylonJS**, and deliberately kept separate from the engine, which remains renderer-agnostic. The editor doubles as a reference integration of the engine's rendering, serialization and worker APIs.
+
+## Features
+
+- **Paint / Erase / Pick** tools with brush sizes 1–4 and a 16 colour palette (colours are stored as voxel meta-data — one colour per Voxel, i.e. per 4×4×4 group of BitVoxels).
+- **Blocky rendering** via `VoxelFaceGeometry` face masks and **smooth rendering** via `VoxelSmoothGeometry` (surface nets) with an adjustable smoothing level (0–3).
+- **Off-main-thread meshing** through a pool of Web Workers running `BVXWorkerHost` / `BVXMesher`, with world snapshots supplied by `BVXSerializer` and geometry returned as transferables.
+- **Save / Load** scenes as compact binary `.bvx` files (`BVXSerializer.saveWorld` / `loadWorld`).
+- **Undo / Redo** with stroke granularity, implemented as chunk byte-snapshots.
+- Demo scene generator, live statistics and keyboard shortcuts.
+
+## Controls
+
+| Input | Action |
+| --- | --- |
+| Left-drag | Paint / erase with the active tool |
+| Middle/Right-drag | Orbit the camera |
+| Mouse wheel | Zoom |
+| `B` / `E` / `I` | Paint / Erase / Pick tool |
+| `1` – `4` | Brush size |
+| `Tab` | Toggle blocky/smooth rendering |
+| `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / Redo |
+| `Ctrl+S` | Save scene |
+
+## Running
+
+The editor depends on the engine via a local file reference, so build the engine first:
+
+```bash
+cd bvx-kit
+npm install
+npm run build
+
+cd ../bvx-editor
+npm install
+npm run dev
+```
+
+Then open the printed local URL (defaults to `http://localhost:5180`).
+
+## Building
+
+```bash
+npm run build
+```
+
+Outputs a static site into `dist/`.

@@ -15,7 +15,9 @@ describe('VoxelChunk', () => {
     it('.setMetaData() .getMetaData() - ensure 32 bit meta-data can be set and returned correctly', () => {
         const chunk = new VoxelChunk32(MortonKey.from(0, 0, 0));
 
-        let metacount: number = 1111;
+        // use a value that requires more than 16 bits of storage to ensure
+        // the full 32 bit range is stored without truncation
+        let metacount: number = 0xFFFF + 1111;
 
         // loop for every voxel and se meta-data for every voxel
         for (let vx: number = 0; vx < VoxelChunk.DIMS; vx++) {
@@ -29,7 +31,7 @@ describe('VoxelChunk', () => {
             }
         }
 
-        metacount = 1111;
+        metacount = 0xFFFF + 1111;
 
         // get and compare the meta-data for every voxel
         for (let vx: number = 0; vx < VoxelChunk.DIMS; vx++) {

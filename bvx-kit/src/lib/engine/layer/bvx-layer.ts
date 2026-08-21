@@ -39,6 +39,15 @@ export class BVXLayer {
     }
 
     /**
+     * Returns the underlying BitArray that stores the BitVoxel states.
+     * Useful for direct buffer access such as serialization, transfer
+     * between threads or high-performance geometry generation.
+     */
+    public get bitArray(): BitArray {
+        return this._bitVoxels;
+    }
+
+    /**
      * Fills all 64 BitVoxels in the Voxel identified by the given VoxelIndex.
      * This is a faster operation compared to setting each BitVoxel individually.
      * 
@@ -70,39 +79,63 @@ export class BVXLayer {
 
     /**
      * Sets a specific BitVoxel to the ON (1) state, based on the provided VoxelIndex.
-     * 
+     *
+     * NOTE: This operates on the BitArray storage directly as the 12-bit VoxelIndex
+     * key is guaranteed to be within the bounds of the layer, skipping redundant
+     * bounds checks in this hot path.
+     *
      * @param key - The VoxelIndex representing the specific BitVoxel to set.
      */
     public set(key: VoxelIndex): void {
-        this._bitVoxels.setBitAt(key.key);
+        const pos: number = key.key;
+        const elements: Uint32Array = this._bitVoxels.elements;
+        elements[pos >> 5] |= (1 << (pos & 31));
     }
 
     /**
      * Unsets (turns off) a specific BitVoxel to the OFF (0) state, based on the provided VoxelIndex.
-     * 
+     *
+     * NOTE: This operates on the BitArray storage directly as the 12-bit VoxelIndex
+     * key is guaranteed to be within the bounds of the layer, skipping redundant
+     * bounds checks in this hot path.
+     *
      * @param key - The VoxelIndex representing the specific BitVoxel to unset.
      */
     public unset(key: VoxelIndex): void {
-        this._bitVoxels.unsetBitAt(key.key);
+        const pos: number = key.key;
+        const elements: Uint32Array = this._bitVoxels.elements;
+        elements[pos >> 5] &= ~(1 << (pos & 31));
     }
 
     /**
      * Toggles a specific BitVoxel between ON (1) and OFF (0) states, based on the previous state.
-     * 
+     *
+     * NOTE: This operates on the BitArray storage directly as the 12-bit VoxelIndex
+     * key is guaranteed to be within the bounds of the layer, skipping redundant
+     * bounds checks in this hot path.
+     *
      * @param key - The VoxelIndex representing the specific BitVoxel to toggle.
      */
     public toggle(key: VoxelIndex): void {
-        this._bitVoxels.toggleBitAt(key.key);
+        const pos: number = key.key;
+        const elements: Uint32Array = this._bitVoxels.elements;
+        elements[pos >> 5] ^= (1 << (pos & 31));
     }
 
     /**
      * Returns the current state (ON or OFF) of the specified BitVoxel.
-     * 
+     *
+     * NOTE: This operates on the BitArray storage directly as the 12-bit VoxelIndex
+     * key is guaranteed to be within the bounds of the layer, skipping redundant
+     * bounds checks in this hot path.
+     *
      * @param key - The VoxelIndex representing the specific BitVoxel to query.
      * @returns - 1 if the BitVoxel is ON, 0 if it is OFF.
      */
     public get(key: VoxelIndex): number {
-        return this._bitVoxels.bitAt(key.key);
+        const pos: number = key.key;
+        const elements: Uint32Array = this._bitVoxels.elements;
+        return (elements[pos >> 5] >>> (pos & 31)) & 1;
     }
 
     /**

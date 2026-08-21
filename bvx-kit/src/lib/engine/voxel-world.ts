@@ -44,11 +44,22 @@ export class VoxelWorld {
     /**
      * Provides access to the VoxelRaycaster, which allows for raycasting operations
      * (e.g., picking voxels based on a ray or line of sight).
-     * 
+     *
      * @returns - The VoxelRaycaster instance for this VoxelWorld.
      */
     public get raycaster(): VoxelRaycaster {
         return this._voxelRaycaster;
+    }
+
+    /**
+     * Provides access to the HashGrid that stores all VoxelChunks in this world.
+     * Useful for iterating over every stored chunk, for example during
+     * serialization or full-world geometry rebuilds.
+     *
+     * @returns - The HashGrid containing all VoxelChunks.
+     */
+    public get chunks(): HashGrid<MortonKey, VoxelChunk> {
+        return this._voxelChunks;
     }
 
     /**

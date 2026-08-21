@@ -35,8 +35,24 @@ export class VoxelChunk8 extends VoxelChunk {
     }
 
     /**
+     * Returns the number of meta-data bits stored per voxel (always 8).
+     */
+    public override get metaBits(): number {
+        return 8;
+    }
+
+    /**
+     * Returns the Uint8Array view of the meta-data storage for this chunk.
+     * Useful for direct buffer access such as serialization or transfer
+     * between threads.
+     */
+    public override get metaData(): Uint8Array {
+        return this._metaData;
+    }
+
+    /**
      * Sets the 8-bit meta-data for a specific voxel, identified by the provided VoxelIndex.
-     * 
+     *
      * @param key - The VoxelIndex identifying the voxel.
      * @param meta - The 8-bit meta-data value to set for the voxel.
      */

@@ -22,8 +22,18 @@ export { VoxelIndex } from "./lib/engine/voxel-index.js";
 export { WorldIndex } from "./lib/engine/world-index.js";
 export { VoxelGeometry } from "./lib/engine/geometry/voxel-geometry.js";
 export { VoxelFaceGeometry } from "./lib/engine/geometry/voxel-face-geometry.js";
+export { VoxelSmoothGeometry } from "./lib/engine/geometry/voxel-smooth-geometry.js";
 export { VoxelRay } from "./lib/engine/raycaster/voxel-ray.js";
 export { VoxelRaycaster } from "./lib/engine/raycaster/voxel-raycaster.js";
+
+// export serialization
+export { BVXSerializer } from "./lib/serialize/bvx-serializer.js";
+
+// export worker support
+export { BVXMesher } from "./lib/worker/bvx-mesher.js";
+export type { MesherRequest, MesherFacesRequest, MesherSmoothRequest, MesherResponse, MesherFacesResponse, MesherSmoothResponse } from "./lib/worker/bvx-mesher.js";
+export { BVXWorkerHost } from "./lib/worker/bvx-worker-host.js";
+export type { MesherScope } from "./lib/worker/bvx-worker-host.js";
 
 // export generators
 export { BVXGeometry } from "./lib/geometry/bvx-geometry.js";

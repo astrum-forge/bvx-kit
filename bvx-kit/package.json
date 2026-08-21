@@ -16,6 +16,7 @@
     "test:run": "jest",
     "test:coverage": "rm -rf coverage && jest --clearCache && jest --coverage --runInBand --collectCoverageFrom='src/lib/**/*.{ts,tsx}'",
     "test:ci": "jest --ci --runInBand --coverage --collectCoverageFrom='src/lib/**/*.{ts,tsx}'",
+    "bench": "npm run build-ts && node bench/bench.js",
     "lint": "npx eslint ."
   },
   "repository": {

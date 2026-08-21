@@ -120,7 +120,7 @@ export class BitOps {
      */
     public static fromBitString(data: string, readIndex = 0): number {
         let value = 0;
-        for (let i: number = readIndex, j = 31; i < 32; i++, j--) {
+        for (let i: number = readIndex, j = 31; i < (readIndex + 32); i++, j--) {
             const dval: string = data[i];
             value = dval === "1" ? BitOps.setBitAt(value, j) : BitOps.unsetBitAt(value, j);
         }
@@ -147,7 +147,7 @@ export class BitOps {
      * @returns - The flattened 1D index.
      */
     public static flattenCoord2(x: number, y: number, bits: number): number {
-        return (((x | 0) << bits) | (y | 0)) & ~(0xFFFFFFFF << (bits * 3));
+        return (((x | 0) << bits) | (y | 0)) & ~(0xFFFFFFFF << (bits * 2));
     }
 
     /**
