@@ -55,7 +55,7 @@ export class MesherPool {
     /**
      * Dispatches a meshing request to the next worker in the pool. The request id
      * is assigned by the pool - any id on the provided request is overwritten.
-     * The request's world snapshot buffer is transferred, not copied.
+     * The request's world and occluder snapshot buffers are transferred, not copied.
      */
     public request(request: MesherRequest): Promise<MesherResponse> {
         request.id = this._nextId++;
@@ -63,9 +63,15 @@ export class MesherPool {
         const worker = this._workers[this._cursor];
         this._cursor = (this._cursor + 1) % this._workers.length;
 
+        const transfer: ArrayBuffer[] = [request.world.buffer as ArrayBuffer];
+
+        if (request.occluders !== undefined) {
+            transfer.push(request.occluders.buffer as ArrayBuffer);
+        }
+
         return new Promise<MesherResponse>((resolve) => {
             this._pending.set(request.id, resolve);
-            worker.postMessage(request, [request.world.buffer as ArrayBuffer]);
+            worker.postMessage(request, transfer);
         });
     }
 

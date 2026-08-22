@@ -20,13 +20,16 @@ import { GhibliToonPlugin, GhibliWaterPlugin, createSky } from "./ghibli";
 import {
     BVXSerializer,
     MortonKey,
+    VoxelChunk0,
     VoxelChunk16,
     VoxelIndex,
     VoxelPhysics,
     VoxelPhysicsLayer,
     VoxelWorld,
+    type SmoothOcclusionMode,
     type MesherRequest,
-    type MesherResponse
+    type MesherResponse,
+    type VoxelChunk
 } from "@astrumforge/bvx-kit";
 import { MesherPool } from "./mesher-pool";
 import { PALETTE } from "./palette";
@@ -104,6 +107,23 @@ interface MeshLane {
      * Shared material for all of the lane's meshes.
      */
     material: StandardMaterial;
+
+    /**
+     * Worlds whose occupancy occludes (culls) this lane's hidden geometry at
+     * layer interfaces. Resolved lazily, as physics worlds are recreated on
+     * scene resets. Occlusion is one-directional - water lists the opaque
+     * lanes so its hidden contact faces are culled, while the opaque lanes
+     * omit water so the ground stays visible through it.
+     */
+    occluders: (() => VoxelWorld)[];
+
+    /**
+     * How this lane claims blur-ambiguous smooth surface cells (see
+     * VoxelSmoothGeometry) - "primary"/"secondary" partition the shared
+     * surface between mutually-occluding opaque lanes, "overlay" suits the
+     * translucent water skin.
+     */
+    occlusionMode: SmoothOcclusionMode;
 }
 
 /**
@@ -260,6 +280,7 @@ export class VoxelEditor {
     private readonly _scratchKey = new MortonKey();
     private readonly _scratchIndex = new VoxelIndex();
     private readonly _scratchDirty = new Set<number>();
+    private readonly _scratchPropagate = new Set<number>();
 
     // reusable occupancy buffer for ambient occlusion baking - one chunk plus a
     // 1-cell border, holding the union of base world and sand occupancy
@@ -383,10 +404,15 @@ export class VoxelEditor {
 
         this._buildGrid();
 
-        // renderable lanes
-        this._baseLane = this._makeLane("base", () => this._world, null, 1.0);
-        this._sandLane = this._makeLane("sand", () => this._sand.world, SAND_COLOR, 1.0);
-        this._waterLane = this._makeLane("water", () => this._water.world, WATER_COLOR, 0.55);
+        // renderable lanes - each lists the worlds that occlude its hidden
+        // geometry at layer interfaces. The opaque lanes (base, sand) occlude
+        // each other and partition their shared smooth surface via the
+        // primary/secondary mode pairing. Water lists both opaque lanes so its
+        // hidden contact skin is culled, while nothing lists water - the
+        // ground stays visible through the translucent surface.
+        this._baseLane = this._makeLane("base", () => this._world, null, 1.0, [(): VoxelWorld => this._sand.world], "primary");
+        this._sandLane = this._makeLane("sand", () => this._sand.world, SAND_COLOR, 1.0, [(): VoxelWorld => this._world], "secondary");
+        this._waterLane = this._makeLane("water", () => this._water.world, WATER_COLOR, 0.55, [(): VoxelWorld => this._world, (): VoxelWorld => this._sand.world], "overlay");
         this._lanes = [this._baseLane, this._sandLane, this._waterLane];
 
         this._setupPhysics();
@@ -574,6 +600,11 @@ export class VoxelEditor {
 
     /**
      * Requests remeshes for every physics chunk that changed since the last drain.
+     *
+     * Occlusion reaches across layers, so sand changes also remesh the lanes it
+     * occludes against (base and water). Water changes propagate nowhere - no
+     * lane lists water as an occluder, which keeps the most active layer's
+     * remesh traffic unchanged.
      */
     private _drainPhysicsDirty(): void {
         const dirty = this._scratchDirty;
@@ -581,15 +612,163 @@ export class VoxelEditor {
         dirty.clear();
         this._sand.drainDirtyChunks(dirty);
 
-        for (const key of dirty) {
-            this._requestMesh(this._sandLane, key);
+        if (dirty.size > 0) {
+            this._remeshLaneDirty(this._sandLane, dirty);
+            this._remeshOccluded([this._baseLane, this._waterLane], dirty);
         }
 
         dirty.clear();
         this._water.drainDirtyChunks(dirty);
 
+        if (dirty.size > 0) {
+            this._remeshLaneDirty(this._waterLane, dirty);
+        }
+    }
+
+    /**
+     * Queues remeshes for a lane's own dirty chunks plus the neighbouring chunks
+     * its surface can reach into. A smooth occluded lane's surface tapers up to
+     * the smoothing radius past its own voxels, so a change near a chunk border
+     * also changes the neighbour's mesh.
+     */
+    private _remeshLaneDirty(lane: MeshLane, dirty: ReadonlySet<number>): void {
         for (const key of dirty) {
-            this._requestMesh(this._waterLane, key);
+            this._requestMesh(lane, key);
+        }
+
+        if (this._renderMode !== "smooth" || lane.occluders.length === 0) {
+            return;
+        }
+
+        // the taper spans `smoothing` samples; the extra margin means a grain
+        // moving out of taper range is still caught by the tick that moved it,
+        // so a neighbour never keeps a stale film
+        const reach = this._smoothing + 2;
+        const world = lane.world();
+        const pending = this._scratchPropagate;
+
+        pending.clear();
+
+        for (const key of dirty) {
+            const mortonKey = new MortonKey(key);
+            const chunk = world.get(mortonKey);
+            const extents = chunk !== null ? this._chunkExtents(chunk) : null;
+
+            for (let ox = -1; ox <= 1; ox++) {
+                for (let oy = -1; oy <= 1; oy++) {
+                    for (let oz = -1; oz <= 1; oz++) {
+                        if ((ox === 0 && oy === 0 && oz === 0) || !this._taperReaches(extents, ox, oy, oz, reach)) {
+                            continue;
+                        }
+
+                        const neighbour = MortonKey.from(mortonKey.x + ox, mortonKey.y + oy, mortonKey.z + oz, this._scratchKey);
+
+                        if (!dirty.has(neighbour.key) && this._isLaneMeshable(lane, neighbour)) {
+                            pending.add(neighbour.key);
+                        }
+                    }
+                }
+            }
+        }
+
+        for (const key of pending) {
+            this._requestMesh(lane, key);
+        }
+    }
+
+    /**
+     * Conservative per-axis extents of a chunk's set BitVoxels in chunk-local
+     * samples, as [minX, maxX, minY, maxY, minZ, maxZ], or null when empty.
+     *
+     * Derived from the 128 storage words rather than a per-bit scan. A word spans
+     * one (vx, vy, vz) voxel and one half of its x range, so x resolves to 2
+     * samples and y/z to 4 - coarse, but only ever over-estimates the reach.
+     */
+    private _chunkExtents(chunk: VoxelChunk): number[] | null {
+        const elements = chunk.layer.bitArray.elements;
+
+        let minX = 16, maxX = -1, minY = 16, maxY = -1, minZ = 16, maxZ = -1;
+
+        for (let w = 0; w < elements.length; w++) {
+            if (elements[w] === 0) {
+                continue;
+            }
+
+            const x = (((w >> 5) & 3) << 2) | ((w & 1) << 1);
+            const y = ((w >> 3) & 3) << 2;
+            const z = ((w >> 1) & 3) << 2;
+
+            if (x < minX) { minX = x; }
+            if (x + 1 > maxX) { maxX = x + 1; }
+            if (y < minY) { minY = y; }
+            if (y + 3 > maxY) { maxY = y + 3; }
+            if (z < minZ) { minZ = z; }
+            if (z + 3 > maxZ) { maxZ = z + 3; }
+        }
+
+        return maxX < 0 ? null : [minX, maxX, minY, maxY, minZ, maxZ];
+    }
+
+    /**
+     * Returns whether occupancy with the provided extents comes within `reach`
+     * samples of the border facing the given neighbour direction - i.e. whether
+     * the lane's tapering surface can reach into that neighbouring chunk. Null
+     * extents mean the chunk was removed, whose former surface may have reached
+     * in any direction.
+     */
+    private _taperReaches(extents: number[] | null, ox: number, oy: number, oz: number, reach: number): boolean {
+        if (extents === null) {
+            return true;
+        }
+
+        const [minX, maxX, minY, maxY, minZ, maxZ] = extents;
+
+        if (ox > 0 && maxX < 16 - reach) { return false; }
+        if (ox < 0 && minX > reach - 1) { return false; }
+        if (oy > 0 && maxY < 16 - reach) { return false; }
+        if (oy < 0 && minY > reach - 1) { return false; }
+        if (oz > 0 && maxZ < 16 - reach) { return false; }
+        if (oz < 0 && minZ > reach - 1) { return false; }
+
+        return true;
+    }
+
+    /**
+     * Queues remeshes in the provided lanes for every chunk whose geometry can
+     * be affected by changes inside the given source chunks. Changes reach one
+     * BitVoxel outward (plus the smoothing blur radius, always under a chunk),
+     * so the source chunks and their 26 neighbours are candidates - only those
+     * that exist in the target lane's world are queued.
+     */
+    private _remeshOccluded(lanes: MeshLane[], sourceKeys: ReadonlySet<number>): void {
+        if (sourceKeys.size === 0) {
+            return;
+        }
+
+        for (const lane of lanes) {
+            const pending = this._scratchPropagate;
+
+            pending.clear();
+
+            for (const key of sourceKeys) {
+                const mortonKey = new MortonKey(key);
+
+                for (let ox = -1; ox <= 1; ox++) {
+                    for (let oy = -1; oy <= 1; oy++) {
+                        for (let oz = -1; oz <= 1; oz++) {
+                            const neighbour = MortonKey.from(mortonKey.x + ox, mortonKey.y + oy, mortonKey.z + oz, this._scratchKey);
+
+                            if (this._isLaneMeshable(lane, neighbour)) {
+                                pending.add(neighbour.key);
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (const key of pending) {
+                this._requestMesh(lane, key);
+            }
         }
     }
 
@@ -804,7 +983,7 @@ export class VoxelEditor {
     /**
      * Creates a renderable lane with its shared material.
      */
-    private _makeLane(id: string, world: () => VoxelWorld, color: [number, number, number] | null, alpha: number): MeshLane {
+    private _makeLane(id: string, world: () => VoxelWorld, color: [number, number, number] | null, alpha: number, occluders: (() => VoxelWorld)[], occlusionMode: SmoothOcclusionMode): MeshLane {
         const material = new StandardMaterial(`lane-mat-${id}`, this._scene);
 
         material.diffuseColor = Color3.White();
@@ -832,7 +1011,9 @@ export class VoxelEditor {
             inFlight: new Set<number>(),
             dirtyAgain: new Set<number>(),
             color: color,
-            material: material
+            material: material,
+            occluders: occluders,
+            occlusionMode: occlusionMode
         };
     }
 
@@ -899,8 +1080,18 @@ export class VoxelEditor {
      */
     private _remeshAll(): void {
         for (const lane of this._lanes) {
-            for (const chunk of lane.world().chunks.values()) {
-                this._requestMesh(lane, chunk.key.key);
+            const keys = this._laneMeshKeys(lane);
+
+            // drop meshes for chunks that left the lane's meshed set - switching
+            // to blocky shrinks it back to the lane's own chunks
+            for (const key of Array.from(lane.meshes.keys())) {
+                if (!keys.has(key)) {
+                    this._disposeOrClear(lane, key);
+                }
+            }
+
+            for (const key of keys) {
+                this._requestMesh(lane, key);
             }
         }
 
@@ -1527,7 +1718,7 @@ export class VoxelEditor {
                 for (let cz = chunkMinZ; cz <= chunkMaxZ; cz++) {
                     const key = MortonKey.from(cx, cy, cz, this._scratchKey);
 
-                    if (this._world.get(key) !== null) {
+                    if (this._isLaneMeshable(this._baseLane, key)) {
                         keys.add(key.key);
                     }
                 }
@@ -1537,6 +1728,10 @@ export class VoxelEditor {
         for (const key of keys) {
             this._requestMesh(this._baseLane, key);
         }
+
+        // base occupancy occludes the sand and water lanes - remesh their
+        // chunks around the edit so culled interfaces stay in sync
+        this._remeshOccluded([this._sandLane, this._waterLane], touched);
     }
 
     // ------------------------------------------------------------ voxel access
@@ -1685,7 +1880,7 @@ export class VoxelEditor {
                     for (let oz = -1; oz <= 1; oz++) {
                         const neighbour = MortonKey.from(mortonKey.x + ox, mortonKey.y + oy, mortonKey.z + oz, this._scratchKey);
 
-                        if (this._world.get(neighbour) !== null) {
+                        if (this._isLaneMeshable(this._baseLane, neighbour)) {
                             keys.add(neighbour.key);
                         }
                     }
@@ -1696,6 +1891,9 @@ export class VoxelEditor {
         for (const key of keys) {
             this._requestMesh(this._baseLane, key);
         }
+
+        // restored base occupancy occludes the sand and water lanes
+        this._remeshOccluded([this._sandLane, this._waterLane], new Set(snapshots.keys()));
 
         this._publishStats(true);
     }
@@ -1716,10 +1914,9 @@ export class VoxelEditor {
 
         const world = lane.world();
         const mortonKey = new MortonKey(chunkKey);
-        const chunk = world.get(mortonKey);
 
-        if (chunk === null) {
-            // chunk no longer exists - drop its mesh
+        if (!this._isLaneMeshable(lane, mortonKey)) {
+            // nothing of this lane can appear here any more - drop its mesh
             this._disposeOrClear(lane, chunkKey);
 
             return;
@@ -1744,13 +1941,141 @@ export class VoxelEditor {
 
         const snapshot = BVXSerializer.saveWorld(region);
 
+        // snapshot the occluding lanes' occupancy over the same neighbourhood -
+        // their cells cull this lane's geometry hidden at layer interfaces
+        const occluderSnapshot = this._buildOccluderSnapshot(lane, mortonKey);
+
         // flipped winding - BabylonJS treats clockwise faces as front-facing,
         // the opposite of the bvx-kit default counter-clockwise convention
         const request: MesherRequest = this._renderMode === "blocky"
             ? { id: 0, type: "faces", chunkKey: chunkKey, flipped: true, world: snapshot }
             : { id: 0, type: "smooth", chunkKey: chunkKey, smoothing: this._smoothing, flipped: true, world: snapshot };
 
+        if (occluderSnapshot !== null) {
+            request.occluders = occluderSnapshot;
+
+            if (request.type === "smooth") {
+                request.occlusionMode = lane.occlusionMode;
+            }
+        }
+
         this._pool.request(request).then((response) => this._onMeshResponse(lane, response));
+    }
+
+    /**
+     * Returns whether the lane can hold renderable geometry at the provided chunk
+     * position - the lane's meshed set.
+     *
+     * Without occlusion that is simply where the lane has voxels. Smooth occluded
+     * lanes mesh the MERGED set (the lane's chunks plus its occluders'), because a
+     * layer can own surface in a chunk it holds no voxels at: the tapering rim of
+     * a translucent overlay patch, or a contested cell of a primary/secondary
+     * partition. Meshing the merged set is what lets those rims land exactly on
+     * the occluding surface rather than floating above it, and bvx-kit derives the
+     * same set for chunk-seam ownership so every seam is still emitted once.
+     */
+    private _isLaneMeshable(lane: MeshLane, mortonKey: MortonKey): boolean {
+        if (lane.world().get(mortonKey) !== null) {
+            return true;
+        }
+
+        // blocky occlusion is exact per BitVoxel - it has no tapering rim, so a
+        // chunk without the lane's own voxels can never show its geometry
+        if (this._renderMode !== "smooth") {
+            return false;
+        }
+
+        for (const occluderWorld of lane.occluders) {
+            if (occluderWorld().get(mortonKey) !== null) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Collects every chunk key of the lane's meshed set (see _isLaneMeshable).
+     */
+    private _laneMeshKeys(lane: MeshLane): Set<number> {
+        const keys = new Set<number>();
+
+        for (const chunk of lane.world().chunks.values()) {
+            keys.add(chunk.key.key);
+        }
+
+        if (this._renderMode === "smooth") {
+            for (const occluderWorld of lane.occluders) {
+                for (const chunk of occluderWorld().chunks.values()) {
+                    keys.add(chunk.key.key);
+                }
+            }
+        }
+
+        return keys;
+    }
+
+    /**
+     * Serializes the merged occupancy of the lane's occluding worlds over the
+     * chunk's 3x3x3 neighbourhood, or null when no occluder chunks overlap it.
+     * Chunks present in a single occluder world are referenced directly - only
+     * positions covered by multiple occluders merge into a scratch chunk.
+     */
+    private _buildOccluderSnapshot(lane: MeshLane, mortonKey: MortonKey): Uint8Array | null {
+        if (lane.occluders.length === 0) {
+            return null;
+        }
+
+        const region = new VoxelWorld();
+        let count = 0;
+
+        for (let ox = -1; ox <= 1; ox++) {
+            for (let oy = -1; oy <= 1; oy++) {
+                for (let oz = -1; oz <= 1; oz++) {
+                    MortonKey.from(mortonKey.x + ox, mortonKey.y + oy, mortonKey.z + oz, this._scratchKey);
+
+                    let first: VoxelChunk | null = null;
+                    let combined: VoxelChunk0 | null = null;
+
+                    for (const occluderWorld of lane.occluders) {
+                        const chunk = occluderWorld().get(this._scratchKey);
+
+                        if (chunk === null) {
+                            continue;
+                        }
+
+                        if (first === null) {
+                            first = chunk;
+
+                            continue;
+                        }
+
+                        // a second occluder covers this position - merge into a
+                        // fresh chunk so neither source world is mutated
+                        if (combined === null) {
+                            combined = new VoxelChunk0(first.key.clone());
+                            combined.layer.bitArray.elements.set(first.layer.bitArray.elements);
+                        }
+
+                        const target = combined.layer.bitArray.elements;
+                        const source = chunk.layer.bitArray.elements;
+
+                        for (let i = 0; i < target.length; i++) {
+                            target[i] |= source[i];
+                        }
+                    }
+
+                    const resolved = combined ?? first;
+
+                    if (resolved !== null) {
+                        region.insert(resolved);
+                        count++;
+                    }
+                }
+            }
+        }
+
+        return count > 0 ? BVXSerializer.saveWorld(region) : null;
     }
 
     /**

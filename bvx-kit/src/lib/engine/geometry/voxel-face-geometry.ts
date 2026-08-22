@@ -50,6 +50,20 @@ export class VoxelFaceGeometry extends VoxelGeometry {
     private static readonly TMP_CHUNK: VoxelChunk = new VoxelChunk0(VoxelFaceGeometry.TMP_MK);
 
     /**
+     * Scratch buffers used to merge the own and occluder BitVoxel storages for the
+     * center chunk and its 6 face neighbours when meshing with an occluder world.
+     */
+    private static readonly _MERGE_SCRATCH: Uint32Array[] = [
+        new Uint32Array(BVXLayer.SIZE / 32),
+        new Uint32Array(BVXLayer.SIZE / 32),
+        new Uint32Array(BVXLayer.SIZE / 32),
+        new Uint32Array(BVXLayer.SIZE / 32),
+        new Uint32Array(BVXLayer.SIZE / 32),
+        new Uint32Array(BVXLayer.SIZE / 32),
+        new Uint32Array(BVXLayer.SIZE / 32)
+    ];
+
+    /**
      * Builds the 6 static neighbour lookup tables used by computeIndices(). This runs
      * once at class initialization time.
      *
@@ -131,6 +145,39 @@ export class VoxelFaceGeometry extends VoxelGeometry {
     }
 
     /**
+     * Returns the BitVoxel storage to sample for one chunk position - the own chunk's
+     * storage merged (bitwise OR) with the occluding chunk's storage. When either side
+     * is missing, the other side's storage is returned directly without a merge copy.
+     *
+     * @param own - The own-world chunk at the position (the empty placeholder when missing).
+     * @param occluder - The occluder-world chunk at the position, or null when missing.
+     * @param scratch - The scratch buffer receiving the merged storage words.
+     * @returns - The Uint32Array BitVoxel storage to sample for occlusion.
+     */
+    private static _MergedElements(own: VoxelChunk, occluder: VoxelChunk | null, scratch: Uint32Array): Uint32Array {
+        const ownElements: Uint32Array = own.layer.bitArray.elements;
+
+        if (occluder === null) {
+            return ownElements;
+        }
+
+        const occluderElements: Uint32Array = occluder.layer.bitArray.elements;
+
+        // the own chunk is the empty placeholder - the occluder stands alone
+        if (own === VoxelFaceGeometry.TMP_CHUNK) {
+            return occluderElements;
+        }
+
+        const length: number = ownElements.length;
+
+        for (let i = 0; i < length; i++) {
+            scratch[i] = ownElements[i] | occluderElements[i];
+        }
+
+        return scratch;
+    }
+
+    /**
      * Computes the geometry indices for all BitVoxels in the given VoxelChunk. The geometry is
      * determined based on the visibility of each voxel's faces, considering the presence of
      * neighboring voxels.
@@ -138,10 +185,19 @@ export class VoxelFaceGeometry extends VoxelGeometry {
      * Invisible or fully occluded voxels will not be rendered. The geometry index is computed
      * based on face visibility using neighboring chunks when necessary.
      *
+     * When an occluder world is provided, its occupancy also culls faces - a face is rendered
+     * only when the neighbouring cell is empty in BOTH worlds. Occluder cells never emit
+     * geometry of their own. This renders multiple co-located layers (e.g. terrain plus a
+     * physics sand layer) without duplicated faces at their interfaces. Occlusion is
+     * deliberately one-directional: a transparent layer (water) lists the opaque layers as
+     * occluders so its hidden contact faces are culled, while the opaque layers omit the
+     * transparent layer so their surfaces stay visible through it.
+     *
      * @param center - The VoxelChunk for which geometry is being generated.
      * @param world - The VoxelWorld instance used to query neighboring chunks for boundary checks.
+     * @param occluders - (Optional) A VoxelWorld whose occupancy additionally culls faces.
      */
-    public computeIndices(center: VoxelChunk, world: VoxelWorld): void {
+    public computeIndices(center: VoxelChunk, world: VoxelWorld, occluders: VoxelWorld | null = null): void {
         // Reset the internal buffer before computing new geometry.
         this.reset();
 
@@ -150,22 +206,36 @@ export class VoxelFaceGeometry extends VoxelGeometry {
         const dfKey: MortonKey = VoxelFaceGeometry.TMP_MK;
         const centerKey: MortonKey = center.key;
 
-        // Get neighboring chunks or use the default chunk if they are not available.
+        // Get neighboring chunks (own and occluder world) - dfKey holds the queried
+        // position for both lookups of each direction.
         const xp: VoxelChunk = world.getOpt(centerKey.copy(dfKey).incX(), dfChunk);
+        const oxp: VoxelChunk | null = occluders !== null ? occluders.get(dfKey) : null;
         const xn: VoxelChunk = world.getOpt(centerKey.copy(dfKey).decX(), dfChunk);
+        const oxn: VoxelChunk | null = occluders !== null ? occluders.get(dfKey) : null;
         const yp: VoxelChunk = world.getOpt(centerKey.copy(dfKey).incY(), dfChunk);
+        const oyp: VoxelChunk | null = occluders !== null ? occluders.get(dfKey) : null;
         const yn: VoxelChunk = world.getOpt(centerKey.copy(dfKey).decY(), dfChunk);
+        const oyn: VoxelChunk | null = occluders !== null ? occluders.get(dfKey) : null;
         const zp: VoxelChunk = world.getOpt(centerKey.copy(dfKey).incZ(), dfChunk);
+        const ozp: VoxelChunk | null = occluders !== null ? occluders.get(dfKey) : null;
         const zn: VoxelChunk = world.getOpt(centerKey.copy(dfKey).decZ(), dfChunk);
+        const ozn: VoxelChunk | null = occluders !== null ? occluders.get(dfKey) : null;
+        const oc: VoxelChunk | null = occluders !== null ? occluders.get(centerKey.copy(dfKey)) : null;
 
-        // Raw BitVoxel storage for the center chunk and its neighbours.
-        const centerElements: Uint32Array = center.layer.bitArray.elements;
-        const xpElements: Uint32Array = xp.layer.bitArray.elements;
-        const xnElements: Uint32Array = xn.layer.bitArray.elements;
-        const ypElements: Uint32Array = yp.layer.bitArray.elements;
-        const ynElements: Uint32Array = yn.layer.bitArray.elements;
-        const zpElements: Uint32Array = zp.layer.bitArray.elements;
-        const znElements: Uint32Array = zn.layer.bitArray.elements;
+        // BitVoxel storage of the center chunk - visibility (which BitVoxels emit
+        // faces) always comes from the own world only.
+        const centerOwnElements: Uint32Array = center.layer.bitArray.elements;
+
+        // Occlusion sampling storage for the center chunk and its neighbours - the
+        // own storage merged with the occluder storage where both are present.
+        const scratch: Uint32Array[] = VoxelFaceGeometry._MERGE_SCRATCH;
+        const centerElements: Uint32Array = VoxelFaceGeometry._MergedElements(center, oc, scratch[0]);
+        const xpElements: Uint32Array = VoxelFaceGeometry._MergedElements(xp, oxp, scratch[1]);
+        const xnElements: Uint32Array = VoxelFaceGeometry._MergedElements(xn, oxn, scratch[2]);
+        const ypElements: Uint32Array = VoxelFaceGeometry._MergedElements(yp, oyp, scratch[3]);
+        const ynElements: Uint32Array = VoxelFaceGeometry._MergedElements(yn, oyn, scratch[4]);
+        const zpElements: Uint32Array = VoxelFaceGeometry._MergedElements(zp, ozp, scratch[5]);
+        const znElements: Uint32Array = VoxelFaceGeometry._MergedElements(zn, ozn, scratch[6]);
 
         // Precomputed neighbour lookup tables for each face direction.
         const tables: Int16Array[] = VoxelFaceGeometry._NEIGHBOUR_TABLES;
@@ -179,13 +249,15 @@ export class VoxelFaceGeometry extends VoxelGeometry {
         // The array that holds the computed geometry indices for the chunk.
         const indices: Uint8Array = this.indices;
 
-        // Iterate the BitVoxel storage word-by-word, skipping empty 32 BitVoxel
+        // Iterate the own BitVoxel storage word-by-word, skipping empty 32 BitVoxel
         // blocks entirely. This is considerably faster than testing all 4096
-        // BitVoxels individually for sparse chunks.
-        const wordCount: number = centerElements.length;
+        // BitVoxels individually for sparse chunks. Occlusion sampling below reads
+        // the merged storages instead, so occluder cells cull faces without ever
+        // emitting geometry themselves.
+        const wordCount: number = centerOwnElements.length;
 
         for (let w = 0; w < wordCount; w++) {
-            let word: number = centerElements[w];
+            let word: number = centerOwnElements[w];
 
             // Skip if none of the 32 BitVoxels in this word are set.
             if (word === 0) {

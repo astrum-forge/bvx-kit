@@ -3,7 +3,7 @@ import { VoxelChunk0 } from "../src/lib/engine/chunks/voxel-chunk-0.js";
 import { VoxelIndex } from "../src/lib/engine/voxel-index.js";
 import { VoxelWorld } from "../src/lib/engine/voxel-world.js";
 import { VoxelFaceGeometry } from "../src/lib/engine/geometry/voxel-face-geometry.js";
-import { VoxelSmoothGeometry } from "../src/lib/engine/geometry/voxel-smooth-geometry.js";
+import { VoxelSmoothGeometry, type SmoothOcclusionMode } from "../src/lib/engine/geometry/voxel-smooth-geometry.js";
 import { MortonKey } from "../src/lib/math/morton-key.js";
 import { BVXGeometry } from "../src/lib/geometry/bvx-geometry.js";
 import { BVXSerializer } from "../src/lib/serialize/bvx-serializer.js";
@@ -140,6 +140,185 @@ describe('BVXMesher', () => {
 
         expect(BVXMesher.transferables(faces).length).toEqual(2);
         expect(BVXMesher.transferables(smooth).length).toEqual(3);
+    });
+
+    /**
+     * Fills a box of BitVoxels (inclusive min, exclusive max) into a chunk.
+     */
+    const fillBox = (chunk: VoxelChunk0, minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number): void => {
+        for (let x = minX; x < maxX; x++) {
+            for (let y = minY; y < maxY; y++) {
+                for (let z = minZ; z < maxZ; z++) {
+                    chunk.setBitVoxel(VoxelIndex.from(x >> 2, y >> 2, z >> 2, x & 3, y & 3, z & 3));
+                }
+            }
+        }
+    };
+
+    /**
+     * Snapshots a chunk and its 26 neighbours from the provided world, exactly as
+     * an application driving the mesher per chunk does.
+     */
+    const snapshot = (world: VoxelWorld, key: MortonKey): Uint8Array | null => {
+        const region = new VoxelWorld();
+        const scratch = new MortonKey();
+        let count = 0;
+
+        for (let ox = -1; ox <= 1; ox++) {
+            for (let oy = -1; oy <= 1; oy++) {
+                for (let oz = -1; oz <= 1; oz++) {
+                    const chunk = world.get(MortonKey.from(key.x + ox, key.y + oy, key.z + oz, scratch));
+
+                    if (chunk !== null) {
+                        region.insert(chunk);
+                        count++;
+                    }
+                }
+            }
+        }
+
+        return count > 0 ? BVXSerializer.saveWorld(region) : null;
+    };
+
+    it('.process() - smooth occluded lane meshes chunks it holds no voxels at, seam-correct', () => {
+        // Water running up to a chunk border with no water in the neighbouring
+        // chunk. The patch's taper continues into that chunk, so the lane meshes
+        // the merged set - the mesher must supply an empty centre chunk there, and
+        // the chunk holding the water must yield the shared seam to it rather than
+        // emitting it as well.
+        const mesher = new BVXMesher();
+
+        // both border directions - the water in the lower chunk tapering up into
+        // the empty one, and in the upper chunk tapering down into it. The second
+        // is the case where a meshed chunk's NEGATIVE neighbour is occluder-only,
+        // which is what decides seam ownership.
+        const placements: [boolean, number][] = [[true, 1], [false, 1], [true, 2], [false, 2], [true, 3], [false, 3]];
+
+        for (const [waterInLowerChunk, smoothing] of placements) {
+            const keyA = MortonKey.from(1, 1, 1);
+            const keyB = MortonKey.from(2, 1, 1);
+
+            const terrain = new VoxelWorld();
+            const terrainA = new VoxelChunk0(keyA.clone());
+            const terrainB = new VoxelChunk0(keyB.clone());
+
+            terrain.insert(terrainA);
+            terrain.insert(terrainB);
+            fillBox(terrainA, 0, 2, 0, 16, 6, 16);
+            fillBox(terrainB, 0, 2, 0, 16, 6, 16);
+
+            const water = new VoxelWorld();
+
+            if (waterInLowerChunk) {
+                const waterA = new VoxelChunk0(keyA.clone());
+
+                water.insert(waterA);
+                fillBox(waterA, 6, 6, 4, 16, 8, 12);
+            }
+            else {
+                const waterB = new VoxelChunk0(keyB.clone());
+
+                water.insert(waterB);
+                fillBox(waterB, 0, 6, 4, 10, 8, 12);
+            }
+
+            // mesh both lanes over the merged chunk set
+            const meshLane = (own: VoxelWorld, occluders: VoxelWorld | null, mode: SmoothOcclusionMode) => {
+                const positions = new Set<string>();
+                const triangles: string[][] = [];
+
+                for (const key of [keyA, keyB]) {
+                    const worldSnapshot = snapshot(own, key);
+
+                    if (worldSnapshot === null) {
+                        continue;
+                    }
+
+                    const request: MesherRequest = {
+                        id: 0,
+                        type: "smooth",
+                        chunkKey: key.key,
+                        smoothing: smoothing,
+                        flipped: false,
+                        world: worldSnapshot
+                    };
+
+                    if (occluders !== null) {
+                        const occluderSnapshot = snapshot(occluders, key);
+
+                        if (occluderSnapshot !== null) {
+                            request.occluders = occluderSnapshot;
+                            request.occlusionMode = mode;
+                        }
+                    }
+
+                    const response = mesher.process(request);
+
+                    if (response.type !== "smooth") {
+                        continue;
+                    }
+
+                    // world space, quantized to absorb the last-bit difference
+                    // between the two chunks' local-space seam computations
+                    const local: string[] = [];
+
+                    for (let i = 0; i < response.vertices.length; i += 3) {
+                        const p = `${Math.round((response.vertices[i] + (key.x * 4)) * 4096)},${Math.round((response.vertices[i + 1] + (key.y * 4)) * 4096)},${Math.round((response.vertices[i + 2] + (key.z * 4)) * 4096)}`;
+
+                        local.push(p);
+                        positions.add(p);
+                    }
+
+                    for (let i = 0; i < response.indices.length; i += 3) {
+                        triangles.push([local[response.indices[i]], local[response.indices[i + 1]], local[response.indices[i + 2]]]);
+                    }
+                }
+
+                return { positions: positions, triangles: triangles };
+            };
+
+            const terrainMesh = meshLane(terrain, null, "primary");
+            const waterMesh = meshLane(water, terrain, "overlay");
+
+            expect(waterMesh.triangles.length).toBeGreaterThan(0);
+
+            // no seam quad may be emitted by both chunks
+            const seen = new Set<string>();
+
+            for (const triangle of waterMesh.triangles) {
+                const key = Array.from(triangle).sort().join("/");
+
+                expect(seen.has(key)).toEqual(false);
+                seen.add(key);
+            }
+
+            // the patch rim must land exactly on the terrain surface
+            const edgeUse = new Map<string, number>();
+
+            for (const [a, b, c] of waterMesh.triangles) {
+                for (const [p, q] of [[a, b], [b, c], [c, a]]) {
+                    const edge = p < q ? `${p}|${q}` : `${q}|${p}`;
+
+                    edgeUse.set(edge, (edgeUse.get(edge) ?? 0) + 1);
+                }
+            }
+
+            let rimCount = 0;
+
+            for (const [edge, count] of edgeUse) {
+                if (count !== 1) {
+                    continue;
+                }
+
+                rimCount++;
+
+                for (const position of edge.split("|")) {
+                    expect(terrainMesh.positions.has(position)).toEqual(true);
+                }
+            }
+
+            expect(rimCount).toBeGreaterThan(0);
+        }
     });
 
     it('BVXWorkerHost.attach() - processes messages through a worker-like scope', () => {

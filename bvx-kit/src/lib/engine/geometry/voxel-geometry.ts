@@ -97,9 +97,11 @@ export abstract class VoxelGeometry {
      * 
      * This method may query neighboring chunks in the VoxelWorld to accurately determine face
      * visibility at the chunk boundaries.
-     * 
+     *
      * @param center - The VoxelChunk for which the geometry is being computed.
      * @param world - The VoxelWorld containing the chunk and its neighboring chunks.
+     * @param occluders - (Optional) A VoxelWorld whose occupancy additionally culls
+     * geometry hidden behind co-located layers (see VoxelFaceGeometry.computeIndices).
      */
-    public abstract computeIndices(center: VoxelChunk, world: VoxelWorld): void;
+    public abstract computeIndices(center: VoxelChunk, world: VoxelWorld, occluders?: VoxelWorld | null): void;
 }

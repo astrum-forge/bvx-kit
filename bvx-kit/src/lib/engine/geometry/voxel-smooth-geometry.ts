@@ -4,6 +4,28 @@ import { BVXLayer } from "../layer/bvx-layer.js";
 import { VoxelWorld } from "../voxel-world.js";
 
 /**
+ * Controls how a layer claims blur-ambiguous surface cells when meshing with
+ * occluders (see VoxelSmoothGeometry.computeGeometry). With field smoothing, a
+ * surface crossing can sit on a sample no layer occupies directly - the mode
+ * decides which layer emits that piece of the shared union surface:
+ *
+ * - "primary": claims contested cells when its own field contribution is at
+ *   least half of the merged field (ties go to this layer). Use for exactly one
+ *   layer of a mutually-occluding pair so the shared surface is partitioned
+ *   without duplicates or holes.
+ * - "secondary": claims contested cells only when its own contribution strictly
+ *   dominates (ties go to the occluders). The counterpart of "primary".
+ * - "overlay": claims every surface cell its own blurred field influences at
+ *   all, including cells the occluders raw-occupy. Use for transparent layers
+ *   rendered on top of the occluding geometry (water over terrain). Claiming
+ *   the full influence support is what welds the patch: its rim lands on cells
+ *   where this layer's blurred field is zero, and there the merged field is
+ *   bit-identical to the occluders' own field, so the rim vertices coincide
+ *   exactly with the occluding layer's mesh instead of floating above it.
+ */
+export type SmoothOcclusionMode = "primary" | "secondary" | "overlay";
+
+/**
  * VoxelSmoothGeometry generates a smooth, renderer-agnostic triangle mesh for the
  * BitVoxels of a VoxelChunk using the Naive Surface Nets algorithm. This is an
  * alternative to the blocky VoxelFaceGeometry + BVXGeometry rendering path.
@@ -80,7 +102,8 @@ export class VoxelSmoothGeometry {
     private static readonly TMP_MK: MortonKey = new MortonKey();
 
     /**
-     * The occupancy field sampled from the chunk and its neighbours.
+     * The occupancy field sampled from the chunk and its neighbours. When meshing
+     * with occluders this holds the merged (own plus occluder) occupancy.
      */
     private readonly _field: Float32Array;
 
@@ -88,6 +111,41 @@ export class VoxelSmoothGeometry {
      * Scratch buffer used during field smoothing passes.
      */
     private readonly _fieldScratch: Float32Array;
+
+    /**
+     * The own-layer occupancy field, blurred identically to the merged field.
+     * Only filled when meshing with occluders and at least one smoothing pass -
+     * used to resolve ownership of blur-ambiguous surface cells.
+     */
+    private readonly _ownField: Float32Array;
+
+    /**
+     * Unblurred own-layer occupancy per field sample (occluder meshing only).
+     */
+    private readonly _rawOwn: Uint8Array;
+
+    /**
+     * Unblurred merged occupancy per field sample (occluder meshing only).
+     */
+    private readonly _rawMerged: Uint8Array;
+
+    /**
+     * Per surface cell flag marking cells whose 8 field corners carry any
+     * own-layer blurred contribution - the influence support of this layer
+     * (occluder meshing only, used by the "overlay" mode).
+     */
+    private readonly _cellInfluenced: Uint8Array;
+
+    /**
+     * Whether the most recent field sampling found occluder occupancy in the
+     * chunk's neighbourhood - gates all ownership logic and vertex compaction.
+     */
+    private _occludersActive = false;
+
+    /**
+     * The ownership mode for blur-ambiguous surface cells (see SmoothOcclusionMode).
+     */
+    private _occlusionMode: SmoothOcclusionMode = "primary";
 
     /**
      * Maps a surface cell to its vertex index, or -1 when the cell has no vertex.
@@ -130,6 +188,10 @@ export class VoxelSmoothGeometry {
 
         this._field = new Float32Array(fieldSize);
         this._fieldScratch = new Float32Array(fieldSize);
+        this._ownField = new Float32Array(fieldSize);
+        this._rawOwn = new Uint8Array(fieldSize);
+        this._rawMerged = new Uint8Array(fieldSize);
+        this._cellInfluenced = new Uint8Array(VoxelSmoothGeometry._MAX_CELLS);
         this._cellVertex = new Int32Array(VoxelSmoothGeometry._MAX_CELLS);
         this._vertices = new Float32Array(VoxelSmoothGeometry._MAX_CELLS * 3);
         this._normals = new Float32Array(VoxelSmoothGeometry._MAX_CELLS * 3);
@@ -190,27 +252,62 @@ export class VoxelSmoothGeometry {
      * Neighbouring chunks in the VoxelWorld are sampled so the generated surface
      * is watertight across chunk seams.
      *
+     * When an occluder world is provided, the surface is contoured from the merged
+     * (own plus occluder) occupancy and only the pieces owned by this layer are
+     * emitted. Interfaces between the layer and its occluders produce no geometry -
+     * they are interior to the merged field - which renders multiple co-located
+     * layers (e.g. terrain plus a physics sand layer) without duplicated surfaces.
+     * Two mutually-occluding layers contour the identical merged field, so their
+     * emitted pieces partition one watertight union surface when meshed with the
+     * "primary"/"secondary" mode pairing. Transparent layers (water) should list
+     * the opaque layers as occluders with the "overlay" mode, while the opaque
+     * layers omit the transparent layer so their surfaces stay visible through it.
+     *
      * @param center - The VoxelChunk for which geometry is being generated.
      * @param world - The VoxelWorld instance used to query neighbouring chunks.
      * @param smoothing - (Optional) The number of field smoothing passes between 0
      * and MAX_SMOOTHING. Defaults to 0 (classic surface nets).
      * @param flipped - (Optional) Whether to flip the triangle winding order, for
      * renderers with an opposite front-face convention. Defaults to false.
+     * @param occluders - (Optional) A VoxelWorld whose occupancy culls the surface
+     * pieces it owns (see above).
+     * @param occlusionMode - (Optional) How blur-ambiguous surface cells are
+     * claimed (see SmoothOcclusionMode). Defaults to "primary".
      */
-    public computeGeometry(center: VoxelChunk, world: VoxelWorld, smoothing = 0, flipped = false): void {
+    public computeGeometry(center: VoxelChunk, world: VoxelWorld, smoothing = 0, flipped = false, occluders: VoxelWorld | null = null, occlusionMode: SmoothOcclusionMode = "primary"): void {
         this._vertexCount = 0;
         this._indexCount = 0;
         this._degenerateNormalCount = 0;
+        this._occlusionMode = occlusionMode;
 
         const passes: number = Math.min(Math.max(smoothing | 0, 0), VoxelSmoothGeometry.MAX_SMOOTHING);
         const margin: number = 1 + passes;
 
         // sample the occupancy field from the center chunk and its neighbours
-        const negativeNeighbours: boolean[] = this._SampleField(center, world, margin);
+        const negativeNeighbours: boolean[] = this._SampleField(center, world, margin, occluders);
 
         // blur the field for each smoothing pass
         for (let pass = 0; pass < passes; pass++) {
-            this._SmoothField(margin);
+            this._SmoothField(margin, this._field);
+        }
+
+        // blur the own-layer field identically - blurring is linear and all blur
+        // arithmetic is exact in floating point (dyadic coefficients on 0/1
+        // inputs), so the own fields of mutually-occluding layers sum exactly to
+        // the merged field. That exactness is what lets the ownership tests
+        // partition without duplicates or holes, and what makes the merged field
+        // bit-identical to the occluders' field wherever this field is zero.
+        if (this._occludersActive) {
+            const ownField: Float32Array = this._ownField;
+            const rawOwn: Uint8Array = this._rawOwn;
+
+            for (let i = 0; i < ownField.length; i++) {
+                ownField[i] = rawOwn[i];
+            }
+
+            for (let pass = 0; pass < passes; pass++) {
+                this._SmoothField(margin, ownField);
+            }
         }
 
         // contour the field - generate one vertex per surface cell
@@ -218,6 +315,11 @@ export class VoxelSmoothGeometry {
 
         // connect surface cell vertices into quads across sign-change edges
         this._ComputeQuads(margin, negativeNeighbours, flipped);
+
+        // drop the vertices of surface pieces owned by the occluders
+        if (this._occludersActive) {
+            this._CompactVertices();
+        }
 
         // resolve normals for cells with a degenerate field gradient
         if (this._degenerateNormalCount > 0) {
@@ -228,14 +330,17 @@ export class VoxelSmoothGeometry {
     /**
      * Samples the occupancy field for the chunk and a margin of surrounding
      * BitVoxels read from neighbouring chunks. Missing chunks sample as empty.
+     * When an occluder world is provided, the field holds the merged occupancy
+     * and the raw own/merged occupancy buffers are filled for ownership tests.
      *
      * @param center - The VoxelChunk being contoured.
      * @param world - The VoxelWorld used to query neighbouring chunks.
      * @param margin - The number of samples to read beyond the chunk on each side.
+     * @param occluders - The occluder VoxelWorld, or null when meshing standalone.
      * @returns - Existence flags for the -x, -y and -z neighbouring chunks, used
      * for seam quad ownership.
      */
-    private _SampleField(center: VoxelChunk, world: VoxelWorld, margin: number): boolean[] {
+    private _SampleField(center: VoxelChunk, world: VoxelWorld, margin: number, occluders: VoxelWorld | null): boolean[] {
         const dims: number = BVXLayer.DIMS;
         const fieldDims: number = VoxelSmoothGeometry._FIELD_DIMS;
         const field: Float32Array = this._field;
@@ -243,12 +348,28 @@ export class VoxelSmoothGeometry {
         const tmpKey: MortonKey = VoxelSmoothGeometry.TMP_MK;
 
         // gather the 3x3x3 neighbourhood of chunk BitVoxel storages (null = missing)
+        // for the own world and, when provided, the occluder world
         const neighbourhood: (Uint32Array | null)[] = new Array<Uint32Array | null>(27);
+        const occNeighbourhood: (Uint32Array | null)[] = new Array<Uint32Array | null>(27);
+
+        let occludersActive = false;
 
         for (let ox = -1; ox <= 1; ox++) {
             for (let oy = -1; oy <= 1; oy++) {
                 for (let oz = -1; oz <= 1; oz++) {
                     const slot: number = ((ox + 1) * 3 + (oy + 1)) * 3 + (oz + 1);
+
+                    MortonKey.from(centerKey.x + ox, centerKey.y + oy, centerKey.z + oz, tmpKey);
+
+                    if (occluders !== null) {
+                        const occChunk: VoxelChunk | null = occluders.get(tmpKey);
+
+                        occNeighbourhood[slot] = occChunk !== null ? occChunk.layer.bitArray.elements : null;
+                        occludersActive = occludersActive || occChunk !== null;
+                    }
+                    else {
+                        occNeighbourhood[slot] = null;
+                    }
 
                     if (ox === 0 && oy === 0 && oz === 0) {
                         neighbourhood[slot] = center.layer.bitArray.elements;
@@ -256,15 +377,23 @@ export class VoxelSmoothGeometry {
                         continue;
                     }
 
-                    MortonKey.from(centerKey.x + ox, centerKey.y + oy, centerKey.z + oz, tmpKey);
-
                     const chunk: VoxelChunk | null = world.get(tmpKey);
                     neighbourhood[slot] = chunk !== null ? chunk.layer.bitArray.elements : null;
                 }
             }
         }
 
+        this._occludersActive = occludersActive;
+
         field.fill(0.0);
+
+        const rawOwn: Uint8Array = this._rawOwn;
+        const rawMerged: Uint8Array = this._rawMerged;
+
+        if (occludersActive) {
+            rawOwn.fill(0);
+            rawMerged.fill(0);
+        }
 
         // fill the field with 0/1 occupancy for samples in [-margin, dims + margin)
         const min: number = -margin;
@@ -282,42 +411,65 @@ export class VoxelSmoothGeometry {
                     const cz: number = sz >> 4;
                     const lz: number = sz & 15;
 
-                    const elements: Uint32Array | null = neighbourhood[((cx + 1) * 3 + (cy + 1)) * 3 + (cz + 1)];
+                    const slot: number = ((cx + 1) * 3 + (cy + 1)) * 3 + (cz + 1);
+                    const elements: Uint32Array | null = neighbourhood[slot];
+                    const occElements: Uint32Array | null = occNeighbourhood[slot];
 
-                    if (elements === null) {
+                    if (elements === null && occElements === null) {
                         continue;
                     }
 
                     // BitVoxel index within the owning chunk
                     const index: number = ((lx >> 2) << 10) | ((ly >> 2) << 8) | ((lz >> 2) << 6) | ((lx & 3) << 4) | ((ly & 3) << 2) | (lz & 3);
-                    const state: number = (elements[index >> 5] >>> (index & 31)) & 1;
+                    const word: number = index >> 5;
+                    const mask: number = 1 << (index & 31);
 
-                    if (state !== 0) {
-                        field[((sx + margin) * fieldDims + (sy + margin)) * fieldDims + (sz + margin)] = 1.0;
+                    const ownState: number = elements !== null && (elements[word] & mask) !== 0 ? 1 : 0;
+                    const occState: number = occElements !== null && (occElements[word] & mask) !== 0 ? 1 : 0;
+
+                    if ((ownState | occState) !== 0) {
+                        const fieldIndex: number = ((sx + margin) * fieldDims + (sy + margin)) * fieldDims + (sz + margin);
+
+                        field[fieldIndex] = 1.0;
+
+                        if (occludersActive) {
+                            rawMerged[fieldIndex] = 1;
+                            rawOwn[fieldIndex] = ownState;
+                        }
                     }
                 }
             }
         }
 
-        // existence flags for the negative-side neighbours (seam quad ownership)
-        const xnExists: boolean = world.get(MortonKey.from(centerKey.x - 1, centerKey.y, centerKey.z, tmpKey)) !== null;
-        const ynExists: boolean = world.get(MortonKey.from(centerKey.x, centerKey.y - 1, centerKey.z, tmpKey)) !== null;
-        const znExists: boolean = world.get(MortonKey.from(centerKey.x, centerKey.y, centerKey.z - 1, tmpKey)) !== null;
+        // Existence flags for the negative-side neighbours (seam quad ownership).
+        // A chunk held only by the occluders still counts: with occluders a layer
+        // can own surface in a chunk it holds no voxels at (the tapering rim of an
+        // overlay patch, or a contested cell of a partition), so the meshed set is
+        // the merged one. Both sides of every seam evaluate this identically, which
+        // is what keeps each seam emitted exactly once.
+        const negativeSlots: number[] = [4, 10, 12]; // (-1,0,0) (0,-1,0) (0,0,-1)
+        const negativeNeighbours: boolean[] = new Array<boolean>(3);
 
-        return [xnExists, ynExists, znExists];
+        for (let axis = 0; axis < 3; axis++) {
+            const slot: number = negativeSlots[axis];
+
+            negativeNeighbours[axis] = neighbourhood[slot] !== null || occNeighbourhood[slot] !== null;
+        }
+
+        return negativeNeighbours;
     }
 
     /**
-     * Applies a single separable 3-tap blur pass (0.25, 0.5, 0.25) to the field
-     * along each axis. Buffer edges are clamped - only samples within the active
-     * margin remain exact, which is guaranteed by the margin sizing.
+     * Applies a single separable 3-tap blur pass (0.25, 0.5, 0.25) to the provided
+     * field along each axis. Buffer edges are clamped - only samples within the
+     * active margin remain exact, which is guaranteed by the margin sizing.
      *
      * @param margin - The active field margin, used to bound the blur region.
+     * @param field - The field buffer to blur in place.
      */
-    private _SmoothField(margin: number): void {
+    private _SmoothField(margin: number, field: Float32Array): void {
         const dims: number = BVXLayer.DIMS;
         const fieldDims: number = VoxelSmoothGeometry._FIELD_DIMS;
-        const field: Float32Array = this._field;
         const scratch: Float32Array = this._fieldScratch;
 
         const min = 0;
@@ -367,7 +519,16 @@ export class VoxelSmoothGeometry {
         const vertices: Float32Array = this._vertices;
         const normals: Float32Array = this._normals;
 
+        // own-layer influence tracking, only when meshing with occluders
+        const occludersActive: boolean = this._occludersActive;
+        const ownField: Float32Array = this._ownField;
+        const cellInfluenced: Uint8Array = this._cellInfluenced;
+
         cellVertex.fill(-1);
+
+        if (occludersActive) {
+            cellInfluenced.fill(0);
+        }
 
         let vertexCount = 0;
 
@@ -464,7 +625,26 @@ export class VoxelSmoothGeometry {
                         this._degenerateNormalCount++;
                     }
 
-                    cellVertex[((cx + 1) * cellDims + (cy + 1)) * cellDims + (cz + 1)] = vertexCount;
+                    const cellIndex: number = ((cx + 1) * cellDims + (cy + 1)) * cellDims + (cz + 1);
+
+                    // flag the cell when any of its 8 corners carries own-layer
+                    // field. All blur weights and inputs are non-negative, so a
+                    // positive sum means at least one positive corner.
+                    if (occludersActive) {
+                        const ownSum: number =
+                            ownField[baseIndex] +
+                            ownField[baseIndex + (fieldDims * fieldDims)] +
+                            ownField[baseIndex + fieldDims] +
+                            ownField[baseIndex + (fieldDims * fieldDims) + fieldDims] +
+                            ownField[baseIndex + 1] +
+                            ownField[baseIndex + (fieldDims * fieldDims) + 1] +
+                            ownField[baseIndex + fieldDims + 1] +
+                            ownField[baseIndex + (fieldDims * fieldDims) + fieldDims + 1];
+
+                        cellInfluenced[cellIndex] = ownSum > 0.0 ? 1 : 0;
+                    }
+
+                    cellVertex[cellIndex] = vertexCount;
                     vertexCount++;
                 }
             }
@@ -494,6 +674,14 @@ export class VoxelSmoothGeometry {
         const field: Float32Array = this._field;
         const cellVertex: Int32Array = this._cellVertex;
         const indices: Uint32Array = this._indices;
+
+        // ownership state - only consulted when meshing with occluders
+        const occludersActive: boolean = this._occludersActive;
+        const mode: SmoothOcclusionMode = this._occlusionMode;
+        const rawOwn: Uint8Array = this._rawOwn;
+        const rawMerged: Uint8Array = this._rawMerged;
+        const ownField: Float32Array = this._ownField;
+        const cellInfluenced: Uint8Array = this._cellInfluenced;
 
         let indexCount: number = this._indexCount;
 
@@ -546,10 +734,56 @@ export class VoxelSmoothGeometry {
                         // offset by +1 so cell -1 maps to slot 0
                         const cellBase: number = ((edge[0] + 1) * cellDims + (edge[1] + 1)) * cellDims + (edge[2] + 1);
 
-                        const v00: number = cellVertex[cellBase - strideU - strideV];
-                        const v10: number = cellVertex[cellBase - strideV];
-                        const v11: number = cellVertex[cellBase];
-                        const v01: number = cellVertex[cellBase - strideU];
+                        const c00: number = cellBase - strideU - strideV;
+                        const c10: number = cellBase - strideV;
+                        const c11: number = cellBase;
+                        const c01: number = cellBase - strideU;
+
+                        if (occludersActive) {
+                            if (mode === "overlay") {
+                                // claim the whole influence support of this layer's
+                                // field. Quads outside it have all 4 cells free of
+                                // own-layer field, where the merged field is
+                                // bit-identical to the occluders' field - so this
+                                // patch's rim vertices are exactly the occluding
+                                // layer's vertices and the two meshes weld.
+                                if (cellInfluenced[c00] === 0 && cellInfluenced[c10] === 0 && cellInfluenced[c11] === 0 && cellInfluenced[c01] === 0) {
+                                    continue;
+                                }
+                            }
+                            else {
+                                // surface pieces are claimed by the layer occupying
+                                // the inside sample of the crossing - raw occupancy
+                                // is exact and exclusive, so quads partition without
+                                // duplicates. Blur-ambiguous cells (inside the
+                                // blurred surface but raw-empty) go to the layer the
+                                // primary/secondary pairing designates.
+                                const insideIndex: number = solidA ? fieldIndex : fieldIndex + fieldStride;
+
+                                if (rawOwn[insideIndex] === 0) {
+                                    // raw-occupied by an occluder - its layer owns it
+                                    if (rawMerged[insideIndex] !== 0) {
+                                        continue;
+                                    }
+
+                                    const own: number = ownField[insideIndex];
+
+                                    if (mode === "primary") {
+                                        if ((own * 2) < field[insideIndex]) {
+                                            continue;
+                                        }
+                                    }
+                                    else if ((own * 2) <= field[insideIndex]) {
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+
+                        const v00: number = cellVertex[c00];
+                        const v10: number = cellVertex[c10];
+                        const v11: number = cellVertex[c11];
+                        const v01: number = cellVertex[c01];
 
                         // quad winding - faces the empty sample. The y axis ring has
                         // opposite parity to the x and z rings.
@@ -587,6 +821,64 @@ export class VoxelSmoothGeometry {
         }
 
         this._indexCount = indexCount;
+    }
+
+    /**
+     * Drops vertices not referenced by any emitted triangle, compacting the vertex
+     * and normal buffers in place and remapping the triangle indices. When meshing
+     * with occluders, the merged field contours surface cells for the occluders'
+     * pieces too - their unclaimed vertices are removed here.
+     */
+    private _CompactVertices(): void {
+        const vertexCount: number = this._vertexCount;
+        const indexCount: number = this._indexCount;
+        const vertices: Float32Array = this._vertices;
+        const normals: Float32Array = this._normals;
+        const indices: Uint32Array = this._indices;
+
+        // reuse the cell-to-vertex map as the remap scratch - its contents are
+        // only needed during quad emission, which has already completed
+        const remap: Int32Array = this._cellVertex;
+
+        remap.fill(0, 0, vertexCount);
+
+        for (let i = 0; i < indexCount; i++) {
+            remap[indices[i]] = 1;
+        }
+
+        // assign new indices in ascending vertex order so the in-place copy
+        // never overwrites a vertex that is still pending
+        let newCount = 0;
+
+        for (let v = 0; v < vertexCount; v++) {
+            if (remap[v] === 0) {
+                remap[v] = -1;
+
+                continue;
+            }
+
+            if (newCount !== v) {
+                const read: number = v * 3;
+                const write: number = newCount * 3;
+
+                vertices[write] = vertices[read];
+                vertices[write + 1] = vertices[read + 1];
+                vertices[write + 2] = vertices[read + 2];
+
+                normals[write] = normals[read];
+                normals[write + 1] = normals[read + 1];
+                normals[write + 2] = normals[read + 2];
+            }
+
+            remap[v] = newCount;
+            newCount++;
+        }
+
+        for (let i = 0; i < indexCount; i++) {
+            indices[i] = remap[indices[i]];
+        }
+
+        this._vertexCount = newCount;
     }
 
     /**

@@ -1,7 +1,8 @@
 import { MortonKey } from "../math/morton-key.js";
 import { VoxelChunk } from "../engine/chunks/voxel-chunk.js";
+import { VoxelChunk0 } from "../engine/chunks/voxel-chunk-0.js";
 import { VoxelFaceGeometry } from "../engine/geometry/voxel-face-geometry.js";
-import { VoxelSmoothGeometry } from "../engine/geometry/voxel-smooth-geometry.js";
+import { VoxelSmoothGeometry, SmoothOcclusionMode } from "../engine/geometry/voxel-smooth-geometry.js";
 import { VoxelWorld } from "../engine/voxel-world.js";
 import { BVXGeometry } from "../../lib/geometry/bvx-geometry.js";
 import { BVXSerializer } from "../serialize/bvx-serializer.js";
@@ -39,6 +40,13 @@ export interface MesherFacesRequest {
      * BVW1 binary world snapshot containing the chunk and its neighbours.
      */
     world: Uint8Array;
+
+    /**
+     * (Optional) BVW1 binary snapshot of the occluding occupancy - the merged
+     * chunks of the other layers whose cells cull hidden faces of this layer
+     * (see VoxelFaceGeometry.computeIndices).
+     */
+    occluders?: Uint8Array;
 }
 
 /**
@@ -74,6 +82,19 @@ export interface MesherSmoothRequest {
      * BVW1 binary world snapshot containing the chunk and its neighbours.
      */
     world: Uint8Array;
+
+    /**
+     * (Optional) BVW1 binary snapshot of the occluding occupancy - the merged
+     * chunks of the other layers whose cells cull hidden surface pieces of this
+     * layer (see VoxelSmoothGeometry.computeGeometry).
+     */
+    occluders?: Uint8Array;
+
+    /**
+     * (Optional) How blur-ambiguous surface cells are claimed when meshing with
+     * occluders (see SmoothOcclusionMode). Defaults to "primary".
+     */
+    occlusionMode?: SmoothOcclusionMode;
 }
 
 /**
@@ -190,7 +211,21 @@ export class BVXMesher {
         // decode the world snapshot - this reconstructs the target chunk and the
         // neighbouring chunks required for seam-correct geometry
         const world: VoxelWorld = BVXSerializer.loadWorld(request.world);
-        const chunk: VoxelChunk | null = world.get(new MortonKey(request.chunkKey));
+        const chunkKey: MortonKey = new MortonKey(request.chunkKey);
+
+        let chunk: VoxelChunk | null = world.get(chunkKey);
+
+        // decode the occluding occupancy snapshot when provided
+        const occluders: VoxelWorld | null = request.occluders !== undefined ? BVXSerializer.loadWorld(request.occluders) : null;
+
+        // With occluders, a layer can own smooth surface in a chunk it holds no
+        // voxels at - the tapering rim of an overlay patch, or a contested cell of
+        // a partition. Meshing an empty center chunk emits that surface instead of
+        // dropping it, and matches the merged meshed set the seam ownership uses.
+        if (chunk === null && request.type === "smooth" && occluders !== null && occluders.get(chunkKey) !== null) {
+            chunk = new VoxelChunk0(chunkKey);
+            world.insert(chunk);
+        }
 
         if (request.type === "faces") {
             if (chunk === null) {
@@ -204,7 +239,7 @@ export class BVXMesher {
             }
 
             const geometry: VoxelFaceGeometry = this._faceGeometry;
-            geometry.computeIndices(chunk, world);
+            geometry.computeIndices(chunk, world, occluders);
 
             return {
                 id: request.id,
@@ -227,7 +262,7 @@ export class BVXMesher {
         }
 
         const geometry: VoxelSmoothGeometry = this._smoothGeometry;
-        geometry.computeGeometry(chunk, world, request.smoothing, request.flipped);
+        geometry.computeGeometry(chunk, world, request.smoothing, request.flipped, occluders, request.occlusionMode ?? "primary");
 
         // copy the exact-length views out of the reusable internal buffers so the
         // response owns (and can transfer) its own data

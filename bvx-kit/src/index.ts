@@ -23,6 +23,7 @@ export { WorldIndex } from "./lib/engine/world-index.js";
 export { VoxelGeometry } from "./lib/engine/geometry/voxel-geometry.js";
 export { VoxelFaceGeometry } from "./lib/engine/geometry/voxel-face-geometry.js";
 export { VoxelSmoothGeometry } from "./lib/engine/geometry/voxel-smooth-geometry.js";
+export type { SmoothOcclusionMode } from "./lib/engine/geometry/voxel-smooth-geometry.js";
 export { VoxelRay } from "./lib/engine/raycaster/voxel-ray.js";
 export { VoxelRaycaster } from "./lib/engine/raycaster/voxel-raycaster.js";
 
