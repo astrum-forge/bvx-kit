@@ -71,6 +71,30 @@ describe('HashGrid', () => {
         expect(grid4.size).toBe(1);
     });
 
+    it('.constructor() - bucket count rounds up to a power of two', () => {
+        // buckets are selected with a mask, so the count must be a power of two
+        expect(new HashGrid<MortonKey, number>(2).size).toBe(2);
+        expect(new HashGrid<MortonKey, number>(3).size).toBe(4);
+        expect(new HashGrid<MortonKey, number>(100).size).toBe(128);
+        expect(new HashGrid<MortonKey, number>(1024).size).toBe(1024);
+        expect(HashGrid.DEFAULT_SIZE & (HashGrid.DEFAULT_SIZE - 1)).toBe(0);
+    });
+
+    it('.set & .get - a non power of two bucket count still stores every key', () => {
+        // rounding must not leave keys addressing a bucket outside the array
+        const grid = new HashGrid<MortonKey, number>(100);
+
+        for (let i = 0; i < 512; i++) {
+            grid.set(MortonKey.from(i & 7, (i >> 3) & 7, i >> 6), i);
+        }
+
+        expect(grid.length).toBe(512);
+
+        for (let i = 0; i < 512; i++) {
+            expect(grid.get(MortonKey.from(i & 7, (i >> 3) & 7, i >> 6))).toBe(i);
+        }
+    });
+
     it('.set & .get & .remove - values, low range', () => {
         const min = 0;
         const max = 11;
@@ -131,7 +155,7 @@ describe('HashGrid', () => {
     });
 
     it('.length - counts all stored key-value pairs', () => {
-        // a small bucket count forces multiple values into the same bucket
+        // the constructor argument is vestigial - passing it must not change behaviour
         const grid = new HashGrid<MortonKey, LinearKey>(4);
 
         expect(grid.length).toBe(0);
@@ -153,7 +177,7 @@ describe('HashGrid', () => {
     });
 
     it('.values() .keys() - iterates all stored key-value pairs', () => {
-        // a small bucket count forces multiple values into the same bucket
+        // the constructor argument is vestigial - passing it must not change behaviour
         const grid = new HashGrid<MortonKey, LinearKey>(4);
 
         const expectedKeys = new Set<number>();
