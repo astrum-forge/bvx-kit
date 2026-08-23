@@ -26,10 +26,10 @@ import {
     VoxelPhysicsLayer,
     VoxelWorld,
     type SmoothOcclusionMode,
-    type MesherRequest,
-    type MesherResponse,
     type VoxelChunk
 } from "@astrumforge/bvx-kit";
+import type { EditorMeshRequest, EditorMeshResponse, BlockyMeshResponse } from "./mesh-protocol";
+import { BIT_VOXEL_SIZE } from "./units";
 import { MesherPool } from "./mesher-pool";
 import { PALETTE } from "./palette";
 
@@ -78,6 +78,18 @@ export interface EditorStats {
      * budget is 16.7 ms at 60 Hz.
      */
     cpuFrameTime: number;
+
+    /**
+     * Meshes the scene submitted geometry for in the last frame, after frustum
+     * culling. Each is drawn again per shadow cascade and once more into the
+     * occlusion pre-pass, so this is the count that batching would divide.
+     *
+     * Deliberately not BabylonJS's own drawCallsCounter: with
+     * compatibilityMode = false the draws are replayed from cached render
+     * bundles rather than re-encoded, so that counter reads zero here and would
+     * be worse than no number at all.
+     */
+    drawnMeshes: number;
 }
 
 /**
@@ -178,12 +190,6 @@ interface MeshLane {
      */
     occlusionMode: SmoothOcclusionMode;
 }
-
-/**
- * The size of one BitVoxel in world units, matching the bvx-kit geometry space
- * (4 BitVoxels per 1.0 unit Voxel, 16 BitVoxels per 4.0 unit chunk).
- */
-const BIT_VOXEL_SIZE = 0.25;
 
 /**
  * The editable region in chunks per axis (16 x 16 x 16 chunks = 256 BitVoxels per
@@ -306,25 +312,6 @@ const FACE_NORMALS: number[][] = [
 ];
 
 /**
- * The two tangent axes of each face (the axes the face spans), indexed by the
- * VoxelFaceGeometry face bit index. Used by the ambient occlusion baking.
- */
-const FACE_TANGENTS: number[][] = [
-    [1, 2], [1, 2], [0, 2], [0, 2], [0, 1], [0, 1]
-];
-
-/**
- * Vertex openness for the 4 baked ambient occlusion levels (0 = fully
- * occluded corner, 3 = fully open).
- *
- * Deeper than a renderer that multiplies AO into the albedo could afford. The
- * toon ramp spends this on the ambient term only (see BVX_AO_KIND), so a fully
- * enclosed corner drops to a third of its skylight without touching what the
- * sun does to the same surface.
- */
-const AO_LEVELS: number[] = [0.42, 0.66, 0.86, 1.0];
-
-/**
  * Occupancy buffer dimensions - one chunk plus a 3-cell border.
  *
  * The border used to be one cell, which is all the blocky path's exact corner
@@ -397,6 +384,7 @@ export class VoxelEditor {
     private readonly _canvas: HTMLCanvasElement;
     private readonly _engine: WebGPUEngine;
     private readonly _scene: Scene;
+
     private readonly _camera: ArcRotateCamera;
     private readonly _pool: MesherPool;
     private readonly _resizeObserver: ResizeObserver;
@@ -502,7 +490,7 @@ export class VoxelEditor {
     // lane the frame's request budget starts from. Responses are held rather
     // than applied on arrival so a burst of them cannot stall a frame - see
     // _pumpMeshQueue.
-    private readonly _readyResponses: { lane: MeshLane, response: MesherResponse }[] = [];
+    private readonly _readyResponses: { lane: MeshLane, response: EditorMeshResponse }[] = [];
     private _pumpCursor = 0;
 
     // scratch corners for the chunk bounding box set on every upload
@@ -2423,14 +2411,33 @@ export class VoxelEditor {
 
         // flipped winding - BabylonJS treats clockwise faces as front-facing,
         // the opposite of the bvx-kit default counter-clockwise convention
-        // indices: false - the blocky and wireframe paths build their own index
-        // buffers, because they need per-face colours and baked occlusion that the
-        // static BVXGeometry vertex tables cannot carry. The mesher's own index
-        // buffer is dead weight there: over a hundred kilobytes per fluid chunk,
-        // allocated in the worker and transferred back only to be dropped.
-        const request: MesherRequest = this._renderMode === "smooth"
-            ? { id: 0, type: "smooth", chunkKey: chunkKey, smoothing: this._smoothing, flipped: true, world: snapshot }
-            : { id: 0, type: "faces", chunkKey: chunkKey, flipped: true, world: snapshot, indices: false };
+        //
+        // The three modes ask for three different things. Solid blocky asks for a
+        // finished mesh, so the whole expansion - occlusion baking, palette
+        // lookup, vertex streams - happens in the worker and the main thread only
+        // uploads. Wireframe still wants raw masks, because it draws face edges
+        // rather than surfaces and needs no occlusion or colour at all; indices:
+        // false because it builds its own line-list index buffer and the mesher's
+        // triangle indices would be over a hundred kilobytes per fluid chunk
+        // allocated only to be dropped.
+        let request: EditorMeshRequest;
+
+        if (this._renderMode === "smooth") {
+            request = { id: 0, type: "smooth", chunkKey: chunkKey, smoothing: this._smoothing, flipped: true, world: snapshot };
+        }
+        else if (this._renderMode === "wireframe") {
+            request = { id: 0, type: "faces", chunkKey: chunkKey, flipped: true, world: snapshot, indices: false };
+        }
+        else {
+            request = {
+                id: 0,
+                type: "blocky",
+                chunkKey: chunkKey,
+                world: snapshot,
+                laneColor: lane.color,
+                water: lane === this._waterLane
+            };
+        }
 
         if (occluderSnapshot !== null) {
             request.occluders = occluderSnapshot;
@@ -2572,7 +2579,7 @@ export class VoxelEditor {
      * chunk that changed again is free to be re-requested without waiting for
      * its previous response to be drawn.
      */
-    private _onMeshResponse(lane: MeshLane, response: MesherResponse): void {
+    private _onMeshResponse(lane: MeshLane, response: EditorMeshResponse): void {
         lane.inFlight.delete(response.chunkKey);
 
         this._readyResponses.push({ lane: lane, response: response });
@@ -2581,22 +2588,22 @@ export class VoxelEditor {
     /**
      * Applies a meshing response to the chunk's renderable mesh.
      */
-    private _applyMeshResponse(lane: MeshLane, response: MesherResponse): void {
+    private _applyMeshResponse(lane: MeshLane, response: EditorMeshResponse): void {
         const chunkKey = response.chunkKey;
 
         // the render mode changed while the request was in flight - the mode
         // switch already queued fresh requests, drop this stale response
-        const expected = this._renderMode === "smooth" ? "smooth" : "faces";
+        const expected = this._renderMode === "smooth" ? "smooth" : this._renderMode === "wireframe" ? "faces" : "blocky";
 
         if (response.type === expected) {
             if (response.type === "smooth") {
                 this._applySmoothMesh(lane, chunkKey, response.vertices, response.normals, response.indices);
             }
-            else if (this._renderMode === "wireframe") {
+            else if (response.type === "faces") {
                 this._applyWireframeMesh(lane, chunkKey, response.faceMasks, response.touched, response.faceCount);
             }
-            else {
-                this._applyBlockyMesh(lane, chunkKey, response.faceMasks, response.touched, response.faceCount);
+            else if (response.type === "blocky") {
+                this._applyBlockyMesh(lane, response);
             }
         }
 
@@ -2736,191 +2743,47 @@ export class VoxelEditor {
     }
 
     /**
-     * Builds a compact blocky mesh from the 6-bit face masks - one coloured quad
-     * per visible BitVoxel face.
+     * Applies a finished blocky mesh from the worker.
+     *
+     * Everything this used to do - building the occlusion field, baking per-corner
+     * ambient occlusion, resolving palette colours, expanding four vertices per
+     * visible face and picking each quad's split diagonal - now happens in the
+     * mesher worker (see mesher.worker.ts and blocky-expand.ts). It was measured
+     * at 51 us per chunk on the main thread, 40% of the whole pipeline, and it was
+     * what capped streaming at a couple of dozen chunks a frame no matter how many
+     * workers were meshing. What is left here is the upload.
      */
-    private _applyBlockyMesh(lane: MeshLane, chunkKey: number, faceMasks: Uint8Array, touched: Uint16Array, faceCount: number): void {
+    private _applyBlockyMesh(lane: MeshLane, response: BlockyMeshResponse): void {
+        const chunkKey = response.chunkKey;
         const mortonKey = this._meshKey;
 
         mortonKey.key = chunkKey;
 
-        const chunk = lane.world().get(mortonKey);
-
-        if (faceCount === 0 || chunk === null) {
+        // Nothing to draw, or the response outlived the world it was meshed from.
+        //
+        // The second case is the one worth spelling out: _replaceWorld clears every
+        // lane's meshes and in-flight set on load, undo and new-scene, but a request
+        // already running in a worker still delivers. Without the live-chunk test
+        // that response rebuilds a mesh for a chunk the world no longer holds, and
+        // the mesh has no owner left to retire it. The wireframe path makes the same
+        // check for the same reason.
+        if (response.faceCount === 0 || lane.world().get(mortonKey) === null) {
             this._disposeOrClear(lane, chunkKey);
 
             return;
         }
 
-        const positions = new Float32Array(faceCount * 4 * 3);
-        const normals = new Float32Array(faceCount * 4 * 3);
-        const colors = new Float32Array(faceCount * 4 * 4);
-        const indices = new Uint32Array(faceCount * 6);
-
-        // Baked corner ambient occlusion, from the union of the base world and
-        // the sand layer. Water bakes it too: the same "how much solid is next
-        // to this face" measure is a shoreline mask there, which is what the
-        // water shader grows surf from - but at a quarter of the cost, see
-        // below.
-        const isWater = lane === this._waterLane;
-
-        // Water spends the measure on the vertex colour instead, so it needs no
-        // occlusion stream - and _uploadMesh would refuse to upload one for the
-        // water material anyway. Water is the lane a running simulation remeshes
-        // hardest, so an allocate-fill-discard of four floats per face there is
-        // the single most repeated piece of dead work in this path.
-        const occlusion = isWater ? null : new Float32Array(faceCount * 4);
-
-        const occupancy = this._buildOcclusion(mortonKey, 1);
-        const cornerAO: number[] = [3, 3, 3, 3];
-
-        let vertex = 0;
-        let indexCount = 0;
-
-        // The mesher reports which BitVoxels carry geometry, so this walks the few
-        // hundred that do rather than all 4096 entries of the mask buffer.
-        for (let t = 0; t < touched.length; t++) {
-            const i = touched[t];
-            const mask = faceMasks[i];
-
-            // decode the BitVoxel local coordinates from the VoxelIndex key layout
-            const x = (((i >> 10) & 3) << 2) | ((i >> 4) & 3);
-            const y = (((i >> 8) & 3) << 2) | ((i >> 2) & 3);
-            const z = (((i >> 6) & 3) << 2) | (i & 3);
-
-            // flat lane colour, or the Voxel colour from meta-data
-            let rgb = lane.color;
-
-            if (rgb === null) {
-                this._scratchIndex.key = i;
-                rgb = PALETTE[chunk.getMetaData(this._scratchIndex) % PALETTE.length].rgb;
-            }
-
-            for (let face = 0; face < 6; face++) {
-                if (((mask >> face) & 1) === 0) {
-                    continue;
-                }
-
-                const corners = FACE_CORNERS[face];
-                const normal = FACE_NORMALS[face];
-                const base = vertex;
-
-                // ambient occlusion per corner - each corner samples the two
-                // edge neighbours and the diagonal neighbour in the layer the
-                // face looks into
-                if (isWater) {
-                    // Water needs only a shoreline mask, and the foam it feeds
-                    // is broken up by noise anyway, so per-corner precision is
-                    // wasted: four samples around the face rather than twelve.
-                    // Water is also the busiest lane by far while a simulation
-                    // runs, so this is the loop that matters most.
-                    const tangents = FACE_TANGENTS[face];
-                    const a1 = tangents[0];
-                    const a2 = tangents[1];
-                    const nx = x + normal[0];
-                    const ny = y + normal[1];
-                    const nz = z + normal[2];
-
-                    let solid = 0;
-
-                    for (let side = 0; side < 4; side++) {
-                        const axis = side < 2 ? a1 : a2;
-                        const step = (side & 1) === 0 ? 1 : -1;
-
-                        const sx = nx + (axis === 0 ? step : 0);
-                        const sy = ny + (axis === 1 ? step : 0);
-                        const sz = nz + (axis === 2 ? step : 0);
-
-                        solid += occupancy[(sx + OCC_BORDER) + ((sy + OCC_BORDER) * OCC_STRIDE_Y) + ((sz + OCC_BORDER) * OCC_STRIDE_Z)];
-                    }
-
-                    cornerAO[0] = cornerAO[1] = cornerAO[2] = cornerAO[3] = 3 - Math.min(3, solid);
-                }
-                else {
-                    const tangents = FACE_TANGENTS[face];
-                    const nx = x + normal[0];
-                    const ny = y + normal[1];
-                    const nz = z + normal[2];
-
-                    for (let c = 0; c < 4; c++) {
-                        const a1 = tangents[0];
-                        const a2 = tangents[1];
-                        const d1 = corners[c][a1] === 1 ? 1 : -1;
-                        const d2 = corners[c][a2] === 1 ? 1 : -1;
-
-                        const s1x = nx + (a1 === 0 ? d1 : 0);
-                        const s1y = ny + (a1 === 1 ? d1 : 0);
-                        const s1z = nz + (a1 === 2 ? d1 : 0);
-                        const s2x = nx + (a2 === 0 ? d2 : 0);
-                        const s2y = ny + (a2 === 1 ? d2 : 0);
-                        const s2z = nz + (a2 === 2 ? d2 : 0);
-
-                        const side1 = occupancy[(s1x + OCC_BORDER) + ((s1y + OCC_BORDER) * OCC_STRIDE_Y) + ((s1z + OCC_BORDER) * OCC_STRIDE_Z)];
-                        const side2 = occupancy[(s2x + OCC_BORDER) + ((s2y + OCC_BORDER) * OCC_STRIDE_Y) + ((s2z + OCC_BORDER) * OCC_STRIDE_Z)];
-                        const diagonal = occupancy[(s1x + s2x - nx + OCC_BORDER) + ((s1y + s2y - ny + OCC_BORDER) * OCC_STRIDE_Y) + ((s1z + s2z - nz + OCC_BORDER) * OCC_STRIDE_Z)];
-
-                        cornerAO[c] = (side1 !== 0 && side2 !== 0) ? 0 : 3 - (side1 + side2 + diagonal);
-                    }
-                }
-
-                for (let c = 0; c < 4; c++) {
-                    const write = vertex * 3;
-
-                    positions[write] = (x + corners[c][0]) * BIT_VOXEL_SIZE;
-                    positions[write + 1] = (y + corners[c][1]) * BIT_VOXEL_SIZE;
-                    positions[write + 2] = (z + corners[c][2]) * BIT_VOXEL_SIZE;
-
-                    normals[write] = normal[0];
-                    normals[write + 1] = normal[1];
-                    normals[write + 2] = normal[2];
-
-                    const openness = AO_LEVELS[cornerAO[c]];
-
-                    if (occlusion === null) {
-                        // water spends the same measure on surf, not shading
-                        this._writeShore(colors, vertex, 1.0 - openness);
-                    }
-                    else {
-                        const colorWrite = vertex * 4;
-
-                        // albedo stays exactly the palette entry - occlusion
-                        // rides in its own stream so the toon ramp can spend it
-                        // on the ambient term alone
-                        colors[colorWrite] = rgb[0];
-                        colors[colorWrite + 1] = rgb[1];
-                        colors[colorWrite + 2] = rgb[2];
-                        colors[colorWrite + 3] = 1.0;
-
-                        occlusion[vertex] = openness;
-                    }
-
-                    vertex++;
-                }
-
-                // split the quad along the diagonal that matches the occlusion
-                // gradient, avoiding the classic interpolation artifact
-                if (cornerAO[0] + cornerAO[2] < cornerAO[1] + cornerAO[3]) {
-                    indices[indexCount] = base + 1;
-                    indices[indexCount + 1] = base + 2;
-                    indices[indexCount + 2] = base + 3;
-                    indices[indexCount + 3] = base + 1;
-                    indices[indexCount + 4] = base + 3;
-                    indices[indexCount + 5] = base;
-                }
-                else {
-                    indices[indexCount] = base;
-                    indices[indexCount + 1] = base + 1;
-                    indices[indexCount + 2] = base + 2;
-                    indices[indexCount + 3] = base;
-                    indices[indexCount + 4] = base + 2;
-                    indices[indexCount + 5] = base + 3;
-                }
-
-                indexCount += 6;
-            }
-        }
-
-        this._uploadMesh(lane, chunkKey, mortonKey, positions, normals, colors, occlusion, indices, faceCount * 2);
+        this._uploadMesh(
+            lane,
+            chunkKey,
+            mortonKey,
+            response.positions,
+            response.normals,
+            response.colors,
+            response.occlusion,
+            response.indices,
+            response.faceCount * 2
+        );
     }
 
     /**
@@ -3655,7 +3518,8 @@ export class VoxelEditor {
             waterGrains: this._water.grainCount,
             activeGrains: this._sand.activeCount + this._water.activeCount,
             fps: this._engine.getFps(),
-            cpuFrameTime: this._cpuFrameTime
+            cpuFrameTime: this._cpuFrameTime,
+            drawnMeshes: this._scene.getActiveMeshes().length
         });
     }
 

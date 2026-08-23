@@ -42,7 +42,7 @@ export const App = () => {
     const [smoothing, setSmoothing] = useState(1);
     const [occlusion, setOcclusion] = useState(true);
     const [playing, setPlaying] = useState(true);
-    const [stats, setStats] = useState<EditorStats>({ chunks: 0, bitVoxels: 0, triangles: 0, workers: 0, sandGrains: 0, waterGrains: 0, activeGrains: 0, fps: 0, cpuFrameTime: 0 });
+    const [stats, setStats] = useState<EditorStats>({ chunks: 0, bitVoxels: 0, triangles: 0, workers: 0, sandGrains: 0, waterGrains: 0, activeGrains: 0, fps: 0, cpuFrameTime: 0, drawnMeshes: 0 });
     const [canUndo, setCanUndo] = useState(false);
     const [canRedo, setCanRedo] = useState(false);
     const [startupError, setStartupError] = useState<string | null>(null);
@@ -472,6 +472,7 @@ export const App = () => {
                             <div><dt>Chunks</dt><dd>{stats.chunks.toLocaleString()}</dd></div>
                             <div><dt>BitVoxels</dt><dd>{stats.bitVoxels.toLocaleString()}</dd></div>
                             <div><dt>Triangles</dt><dd>{stats.triangles.toLocaleString()}</dd></div>
+                            <div><dt>Drawn meshes</dt><dd>{stats.drawnMeshes.toLocaleString()}</dd></div>
                             <div><dt>Mesh workers</dt><dd>{stats.workers}</dd></div>
                         </dl>
                     </section>

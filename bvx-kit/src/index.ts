@@ -26,6 +26,13 @@ export { VoxelGeometry } from "./lib/engine/geometry/voxel-geometry.js";
 export { VoxelFaceGeometry } from "./lib/engine/geometry/voxel-face-geometry.js";
 export { VoxelSmoothGeometry } from "./lib/engine/geometry/voxel-smooth-geometry.js";
 export type { SmoothOcclusionMode } from "./lib/engine/geometry/voxel-smooth-geometry.js";
+export { VoxelQuadGeometry } from "./lib/engine/geometry/voxel-quad-geometry.js";
+export { CpuSmoothMesher } from "./lib/engine/geometry/cpu-smooth-mesher.js";
+export { GpuSmoothMesher } from "./lib/engine/geometry/gpu-smooth-mesher.js";
+export type { GpuSmoothMeshHandle, GpuSmoothMesherOptions } from "./lib/engine/geometry/gpu-smooth-mesher.js";
+export { SMOOTH_MESHER_WGSL } from "./lib/engine/geometry/smooth-mesher.wgsl.js";
+export type { SmoothMesher, SmoothMeshRequest, SmoothMeshResult, SmoothMeshResidency } from "./lib/engine/geometry/smooth-mesher.js";
+export type { QuadOcclusion, QuadOcclusionSource } from "./lib/engine/geometry/voxel-quad-geometry.js";
 export { VoxelRay } from "./lib/engine/raycaster/voxel-ray.js";
 export { VoxelRaycaster } from "./lib/engine/raycaster/voxel-raycaster.js";
 

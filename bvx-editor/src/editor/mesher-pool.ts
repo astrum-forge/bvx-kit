@@ -1,4 +1,4 @@
-import type { MesherRequest, MesherResponse } from "@astrumforge/bvx-kit";
+import type { EditorMeshRequest, EditorMeshResponse } from "./mesh-protocol";
 
 /**
  * A small pool of meshing Web Workers. Requests are dispatched round-robin and
@@ -13,7 +13,7 @@ export class MesherPool {
     /**
      * Pending request promises keyed by request id.
      */
-    private readonly _pending: Map<number, (response: MesherResponse) => void>;
+    private readonly _pending: Map<number, (response: EditorMeshResponse) => void>;
 
     /**
      * Monotonic id counter for requests.
@@ -32,7 +32,7 @@ export class MesherPool {
         for (let i = 0; i < size; i++) {
             const worker = new Worker(new URL("./mesher.worker.ts", import.meta.url), { type: "module" });
 
-            worker.onmessage = (event: MessageEvent<MesherResponse>) => {
+            worker.onmessage = (event: MessageEvent<EditorMeshResponse>) => {
                 const resolve = this._pending.get(event.data.id);
 
                 if (resolve) {
@@ -57,7 +57,7 @@ export class MesherPool {
      * is assigned by the pool - any id on the provided request is overwritten.
      * The request's world and occluder snapshot buffers are transferred, not copied.
      */
-    public request(request: MesherRequest): Promise<MesherResponse> {
+    public request(request: EditorMeshRequest): Promise<EditorMeshResponse> {
         request.id = this._nextId++;
 
         const worker = this._workers[this._cursor];
@@ -69,7 +69,7 @@ export class MesherPool {
             transfer.push(request.occluders.buffer as ArrayBuffer);
         }
 
-        return new Promise<MesherResponse>((resolve) => {
+        return new Promise<EditorMeshResponse>((resolve) => {
             this._pending.set(request.id, resolve);
             worker.postMessage(request, transfer);
         });
