@@ -3,6 +3,7 @@ import { VoxelChunk } from "../engine/chunks/voxel-chunk.js";
 import { VoxelChunk0 } from "../engine/chunks/voxel-chunk-0.js";
 import { VoxelFaceGeometry } from "../engine/geometry/voxel-face-geometry.js";
 import { VoxelSmoothGeometry, SmoothOcclusionMode } from "../engine/geometry/voxel-smooth-geometry.js";
+import { VoxelQuadGeometry, QuadOcclusion, QuadOcclusionSource } from "../engine/geometry/voxel-quad-geometry.js";
 import { VoxelWorld } from "../engine/voxel-world.js";
 import { BVXGeometry } from "../../lib/geometry/bvx-geometry.js";
 import { BVXSerializer } from "../serialize/bvx-serializer.js";
@@ -113,9 +114,61 @@ export interface MesherSmoothRequest {
 }
 
 /**
+ * Request to generate packed blocky quads for a single chunk, with ambient
+ * occlusion baked in (see VoxelQuadGeometry).
+ *
+ * This is the "faces" request with the expensive half done as well. A faces
+ * response hands back 6-bit masks the caller must still expand into per-corner
+ * occlusion and vertex data; a quads response hands back one 32-bit word per
+ * visible face with the occlusion already resolved. That work is identical
+ * wherever it runs, so running it here means running it off the caller's thread,
+ * and the result is small enough to transfer cheaply - four bytes per face
+ * against roughly two hundred for an expanded vertex quad.
+ */
+export interface MesherQuadsRequest {
+    /**
+     * Caller-defined identifier, echoed back in the response.
+     */
+    id: number;
+
+    /**
+     * The type of geometry to generate.
+     */
+    type: "quads";
+
+    /**
+     * The MortonKey (encoded as a number) of the chunk to generate geometry for.
+     */
+    chunkKey: number;
+
+    /**
+     * BVW1 binary world snapshot containing the chunk and its neighbours.
+     */
+    world: Uint8Array;
+
+    /**
+     * (Optional) BVW1 binary snapshot of the occluding occupancy - the merged
+     * chunks of the other layers whose cells cull hidden faces of this layer
+     * (see VoxelFaceGeometry.computeIndices).
+     */
+    occluders?: Uint8Array;
+
+    /**
+     * (Optional) How per-corner ambient occlusion is derived. Defaults to "corner".
+     */
+    occlusion?: QuadOcclusion;
+
+    /**
+     * (Optional) Which occupancy the ambient occlusion samples. Defaults to
+     * "merged".
+     */
+    occlusionSource?: QuadOcclusionSource;
+}
+
+/**
  * Union of all mesher request types.
  */
-export type MesherRequest = MesherFacesRequest | MesherSmoothRequest;
+export type MesherRequest = MesherFacesRequest | MesherSmoothRequest | MesherQuadsRequest;
 
 /**
  * Response containing generated blocky face geometry. The renderer combines the
@@ -203,9 +256,46 @@ export interface MesherSmoothResponse {
 }
 
 /**
+ * Response containing packed blocky quads with baked ambient occlusion.
+ */
+export interface MesherQuadsResponse {
+    /**
+     * The identifier of the originating request.
+     */
+    id: number;
+
+    /**
+     * The type of geometry that was generated.
+     */
+    type: "quads";
+
+    /**
+     * The MortonKey (encoded as a number) of the chunk geometry was generated for.
+     */
+    chunkKey: number;
+
+    /**
+     * One packed word per visible face (see VoxelQuadGeometry for the layout),
+     * in ascending BitVoxel index and then ascending face order.
+     */
+    quads: Uint32Array;
+
+    /**
+     * The chunk's 64 per-voxel meta-data entries, widened to 32 bits so one
+     * response shape serves every chunk width. Empty when the chunk carries no
+     * meta-data.
+     *
+     * Carried because a quad references its material by BitVoxel index alone -
+     * the recipient resolves it as `meta[index >> 6]` without needing the chunk.
+     * At 256 bytes it costs less than a single expanded quad.
+     */
+    meta: Uint32Array;
+}
+
+/**
  * Union of all mesher response types.
  */
-export type MesherResponse = MesherFacesResponse | MesherSmoothResponse;
+export type MesherResponse = MesherFacesResponse | MesherSmoothResponse | MesherQuadsResponse;
 
 /**
  * BVXMesher processes MesherRequests into MesherResponses. It is intentionally
@@ -228,9 +318,15 @@ export class BVXMesher {
      */
     private readonly _smoothGeometry: VoxelSmoothGeometry;
 
+    /**
+     * Reusable packed quad generator.
+     */
+    private readonly _quadGeometry: VoxelQuadGeometry;
+
     constructor() {
         this._faceGeometry = new VoxelFaceGeometry();
         this._smoothGeometry = new VoxelSmoothGeometry();
+        this._quadGeometry = new VoxelQuadGeometry();
     }
 
     /**
@@ -258,6 +354,32 @@ export class BVXMesher {
         if (chunk === null && request.type === "smooth" && occluders !== null && occluders.get(chunkKey) !== null) {
             chunk = new VoxelChunk0(chunkKey);
             world.insert(chunk);
+        }
+
+        if (request.type === "quads") {
+            if (chunk === null) {
+                return {
+                    id: request.id,
+                    type: "quads",
+                    chunkKey: request.chunkKey,
+                    quads: new Uint32Array(0),
+                    meta: new Uint32Array(0)
+                };
+            }
+
+            const geometry: VoxelQuadGeometry = this._quadGeometry;
+
+            geometry.computeQuads(chunk, world, occluders, request.occlusion ?? "corner", request.occlusionSource ?? "merged");
+
+            const source: Uint8Array | Uint16Array | Uint32Array | null = chunk.metaData;
+
+            return {
+                id: request.id,
+                type: "quads",
+                chunkKey: request.chunkKey,
+                quads: new Uint32Array(geometry.quads),
+                meta: source !== null ? Uint32Array.from(source) : new Uint32Array(0)
+            };
         }
 
         if (request.type === "faces") {
@@ -323,9 +445,19 @@ export class BVXMesher {
      * @returns - The list of transferable ArrayBuffers.
      */
     public static transferables(response: MesherResponse): ArrayBuffer[] {
-        const buffers: ArrayBuffer[] = response.type === "faces"
-            ? [response.faceMasks.buffer as ArrayBuffer, response.touched.buffer as ArrayBuffer, response.indices.buffer as ArrayBuffer]
-            : [response.vertices.buffer as ArrayBuffer, response.normals.buffer as ArrayBuffer, response.indices.buffer as ArrayBuffer];
+        let buffers: ArrayBuffer[];
+
+        switch (response.type) {
+            case "faces":
+                buffers = [response.faceMasks.buffer as ArrayBuffer, response.touched.buffer as ArrayBuffer, response.indices.buffer as ArrayBuffer];
+                break;
+            case "quads":
+                buffers = [response.quads.buffer as ArrayBuffer, response.meta.buffer as ArrayBuffer];
+                break;
+            default:
+                buffers = [response.vertices.buffer as ArrayBuffer, response.normals.buffer as ArrayBuffer, response.indices.buffer as ArrayBuffer];
+                break;
+        }
 
         // An empty array is the mesher's answer for "nothing here" and for the
         // index buffer a renderer opted out of. Transferring a zero-length

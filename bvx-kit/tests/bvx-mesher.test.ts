@@ -1,9 +1,11 @@
 import { describe, expect, it } from '@jest/globals';
 import { VoxelChunk0 } from "../src/lib/engine/chunks/voxel-chunk-0.js";
+import { VoxelChunk32 } from "../src/lib/engine/chunks/voxel-chunk-32.js";
 import { VoxelIndex } from "../src/lib/engine/voxel-index.js";
 import { VoxelWorld } from "../src/lib/engine/voxel-world.js";
 import { VoxelFaceGeometry } from "../src/lib/engine/geometry/voxel-face-geometry.js";
 import { VoxelSmoothGeometry, type SmoothOcclusionMode } from "../src/lib/engine/geometry/voxel-smooth-geometry.js";
+import { VoxelQuadGeometry } from "../src/lib/engine/geometry/voxel-quad-geometry.js";
 import { MortonKey } from "../src/lib/math/morton-key.js";
 import { BVXGeometry } from "../src/lib/geometry/bvx-geometry.js";
 import { BVXSerializer } from "../src/lib/serialize/bvx-serializer.js";
@@ -430,6 +432,103 @@ describe('BVXMesher', () => {
             if (t > 0) {
                 expect(response.touched[t]).toBeGreaterThan(response.touched[t - 1]);
             }
+        }
+    });
+
+    it('.process() - quads request matches direct quad generation', () => {
+        const { world, chunk } = buildWorld();
+        const mesher = new BVXMesher();
+
+        const response = mesher.process({
+            id: 11,
+            type: "quads",
+            chunkKey: chunk.key.key,
+            world: BVXSerializer.saveWorld(world)
+        });
+
+        expect(response.id).toEqual(11);
+        expect(response.type).toEqual("quads");
+
+        const reference = new VoxelQuadGeometry();
+
+        reference.computeQuads(chunk, world);
+
+        if (response.type === "quads") {
+            expect(response.chunkKey).toEqual(chunk.key.key);
+            expect(Array.from(response.quads)).toEqual(Array.from(reference.quads));
+
+            // VoxelChunk0 carries no meta-data, so the response reports none
+            expect(response.meta.length).toEqual(0);
+        }
+    });
+
+    it('.process() - quads request reports meta-data for a chunk that has it', () => {
+        const world = new VoxelWorld();
+        const chunk = new VoxelChunk32(MortonKey.from(2, 2, 2));
+
+        chunk.setBitVoxel(VoxelIndex.from(1, 1, 1, 1, 1, 1));
+        chunk.setMetaData(VoxelIndex.from(1, 1, 1, 1, 1, 1), 0xABCD1234);
+
+        world.insert(chunk);
+
+        const mesher = new BVXMesher();
+
+        const response = mesher.process({
+            id: 12,
+            type: "quads",
+            chunkKey: chunk.key.key,
+            world: BVXSerializer.saveWorld(world)
+        });
+
+        if (response.type === "quads") {
+            expect(response.meta.length).toEqual(64);
+
+            // a quad resolves its material as meta[index >> 6]
+            const quad = response.quads[0];
+            const index = VoxelQuadGeometry.indexOf(quad);
+
+            expect(response.meta[index >> 6]).toEqual(0xABCD1234);
+        }
+    });
+
+    it('.process() - quads request on an unknown chunk returns empty buffers', () => {
+        const { world } = buildWorld();
+        const mesher = new BVXMesher();
+
+        const response = mesher.process({
+            id: 13,
+            type: "quads",
+            chunkKey: MortonKey.from(9, 9, 9).key,
+            world: BVXSerializer.saveWorld(world)
+        });
+
+        if (response.type === "quads") {
+            expect(response.quads.length).toEqual(0);
+            expect(response.meta.length).toEqual(0);
+        }
+
+        // an empty response contributes no transferables
+        expect(BVXMesher.transferables(response).length).toEqual(0);
+    });
+
+    it('.transferables() - a quads response transfers its two buffers', () => {
+        const { world, chunk } = buildWorld();
+        const mesher = new BVXMesher();
+
+        const response = mesher.process({
+            id: 14,
+            type: "quads",
+            chunkKey: chunk.key.key,
+            world: BVXSerializer.saveWorld(world)
+        });
+
+        const buffers = BVXMesher.transferables(response);
+
+        // VoxelChunk0 has no meta-data, so only the quad buffer is transferred
+        expect(buffers.length).toEqual(1);
+
+        if (response.type === "quads") {
+            expect(buffers[0]).toBe(response.quads.buffer);
         }
     });
 });
