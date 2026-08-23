@@ -47,6 +47,21 @@ export interface MesherFacesRequest {
      * (see VoxelFaceGeometry.computeIndices).
      */
     occluders?: Uint8Array;
+
+    /**
+     * (Optional) Whether to build the renderable triangle indices. Defaults to
+     * true.
+     *
+     * Set false by a renderer that assembles its own vertex data from faceMasks
+     * and touched - per-face colouring or baked ambient occlusion both force
+     * that, because the static BVXGeometry vertex tables carry neither. Such a
+     * renderer never reads response.indices, and building it is not free: it is
+     * an allocation of faceCount * 6 uint32 that must then be transferred back.
+     * A busy fluid chunk carries several thousand faces, so the dead buffer runs
+     * to well over a hundred kilobytes per response - on a simulation remeshing
+     * tens of chunks a frame, megabytes a frame of garbage.
+     */
+    indices?: boolean;
 }
 
 /**
@@ -129,7 +144,25 @@ export interface MesherFacesResponse {
     faceMasks: Uint8Array;
 
     /**
-     * Renderable triangle indices into the static BVXGeometry lookup tables.
+     * The BitVoxel indices carrying a non-zero mask, in ascending order
+     * (see VoxelGeometry.touched).
+     *
+     * A renderer building its own vertex data from faceMasks should walk this rather
+     * than scanning all 4096 entries: most chunks in a world with depth are uniform
+     * and produce nothing, and even a surface chunk typically populates only a few
+     * hundred of them.
+     */
+    touched: Uint16Array;
+
+    /**
+     * The total number of visible faces across every mask - what the renderer needs
+     * to size its buffers, without counting them itself.
+     */
+    faceCount: number;
+
+    /**
+     * Renderable triangle indices into the static BVXGeometry lookup tables, or
+     * empty when the request set indices to false.
      */
     indices: Uint32Array;
 }
@@ -234,6 +267,8 @@ export class BVXMesher {
                     type: "faces",
                     chunkKey: request.chunkKey,
                     faceMasks: new Uint8Array(0),
+                    touched: new Uint16Array(0),
+                    faceCount: 0,
                     indices: new Uint32Array(0)
                 };
             }
@@ -246,7 +281,11 @@ export class BVXMesher {
                 type: "faces",
                 chunkKey: request.chunkKey,
                 faceMasks: new Uint8Array(geometry.indices),
-                indices: BVXGeometry.getIndices(geometry, request.flipped)
+                touched: new Uint16Array(geometry.touched),
+                faceCount: geometry.popCount(),
+                indices: request.indices === false
+                    ? new Uint32Array(0)
+                    : BVXGeometry.getIndices(geometry, request.flipped)
             };
         }
 
@@ -284,10 +323,15 @@ export class BVXMesher {
      * @returns - The list of transferable ArrayBuffers.
      */
     public static transferables(response: MesherResponse): ArrayBuffer[] {
-        if (response.type === "faces") {
-            return [response.faceMasks.buffer as ArrayBuffer, response.indices.buffer as ArrayBuffer];
-        }
+        const buffers: ArrayBuffer[] = response.type === "faces"
+            ? [response.faceMasks.buffer as ArrayBuffer, response.touched.buffer as ArrayBuffer, response.indices.buffer as ArrayBuffer]
+            : [response.vertices.buffer as ArrayBuffer, response.normals.buffer as ArrayBuffer, response.indices.buffer as ArrayBuffer];
 
-        return [response.vertices.buffer as ArrayBuffer, response.normals.buffer as ArrayBuffer, response.indices.buffer as ArrayBuffer];
+        // An empty array is the mesher's answer for "nothing here" and for the
+        // index buffer a renderer opted out of. Transferring a zero-length
+        // buffer is legal but pointless, and postMessage rejects the same
+        // buffer appearing twice - which is exactly what happens if two of
+        // these ever come from one shared empty allocation.
+        return buffers.filter((buffer) => buffer.byteLength > 0);
     }
 }

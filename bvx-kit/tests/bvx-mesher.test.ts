@@ -117,6 +117,38 @@ describe('BVXMesher', () => {
         }
     });
 
+    it('.process() - indices: false skips the triangle indices but keeps the masks', () => {
+        const { world, chunk } = buildWorld();
+        const mesher = new BVXMesher();
+
+        const base: MesherRequest = {
+            id: 1,
+            type: "faces",
+            chunkKey: chunk.key.key,
+            flipped: false,
+            world: BVXSerializer.saveWorld(world)
+        };
+
+        const withIndices = mesher.process(base);
+        const without = mesher.process({ ...base, indices: false, world: BVXSerializer.saveWorld(world) });
+
+        if (withIndices.type !== "faces" || without.type !== "faces") {
+            throw new Error("expected faces responses");
+        }
+
+        // the opted-out response carries no indices at all
+        expect(withIndices.indices.length).toBeGreaterThan(0);
+        expect(without.indices.length).toEqual(0);
+
+        // everything a renderer building its own index buffer needs is unchanged
+        expect(without.faceCount).toEqual(withIndices.faceCount);
+        expect(Array.from(without.touched)).toEqual(Array.from(withIndices.touched));
+        expect(Array.from(without.faceMasks)).toEqual(Array.from(withIndices.faceMasks));
+
+        // and the empty buffer is not offered up for transfer
+        expect(BVXMesher.transferables(without).length).toEqual(2);
+    });
+
     it('.transferables() - collects the response buffers', () => {
         const { world, chunk } = buildWorld();
         const mesher = new BVXMesher();
@@ -138,7 +170,8 @@ describe('BVXMesher', () => {
             world: BVXSerializer.saveWorld(world)
         });
 
-        expect(BVXMesher.transferables(faces).length).toEqual(2);
+        // faceMasks, touched and indices
+        expect(BVXMesher.transferables(faces).length).toEqual(3);
         expect(BVXMesher.transferables(smooth).length).toEqual(3);
     });
 
@@ -353,5 +386,50 @@ describe('BVXMesher', () => {
         expect(posted[0].message.id).toEqual(42);
         expect(posted[0].message.type).toEqual("smooth");
         expect(posted[0].transfer?.length).toEqual(3);
+    });
+    it('.process() - the faces response carries the touched list and face count', () => {
+        const world = new VoxelWorld();
+        const chunk = new VoxelChunk0(MortonKey.from(1, 1, 1));
+
+        // three isolated BitVoxels, fully exposed
+        chunk.setBitVoxel(VoxelIndex.from(0, 0, 0, 1, 1, 1));
+        chunk.setBitVoxel(VoxelIndex.from(2, 2, 2, 0, 0, 0));
+        chunk.setBitVoxel(VoxelIndex.from(3, 3, 3, 3, 3, 3));
+        world.insert(chunk);
+
+        const mesher = new BVXMesher();
+        const response = mesher.process({
+            id: 1,
+            type: "faces",
+            chunkKey: chunk.key.key,
+            flipped: false,
+            world: BVXSerializer.saveWorld(world)
+        });
+
+        if (response.type !== "faces") {
+            throw new Error("expected a faces response");
+        }
+
+        expect(response.faceCount).toEqual(18);
+        expect(response.touched.length).toEqual(3);
+
+        // the touched list must be ascending and agree with the mask buffer
+        let nonZero = 0;
+
+        for (let i = 0; i < response.faceMasks.length; i++) {
+            if (response.faceMasks[i] !== 0) {
+                nonZero++;
+            }
+        }
+
+        expect(nonZero).toEqual(response.touched.length);
+
+        for (let t = 0; t < response.touched.length; t++) {
+            expect(response.faceMasks[response.touched[t]]).toEqual(63);
+
+            if (t > 0) {
+                expect(response.touched[t]).toBeGreaterThan(response.touched[t - 1]);
+            }
+        }
     });
 });

@@ -539,4 +539,135 @@ describe('VoxelPhysics', () => {
         expect(moves).toEqual(64);
         expect(physics.budgetExceeded).toEqual(false);
     });
+
+    /**
+     * Fills a layer with a wide slab of grains that all want to move, spanning
+     * enough chunks that a budget can cut the sweep part way through.
+     */
+    const fillSlab = (layer: VoxelPhysicsLayer): void => {
+        for (let x = 0; x < 32; x++) {
+            for (let z = 0; z < 32; z++) {
+                for (let y = 40; y < 48; y++) {
+                    layer.set(x, y, z);
+                }
+            }
+        }
+    };
+
+    it('.update() - a work budget bounds the probes and defers the rest', () => {
+        const reference = makePhysics();
+        const referenceSand = reference.addLayer(VoxelPhysics.SAND);
+
+        fillSlab(referenceSand);
+        reference.update();
+
+        const unbudgetedWork = referenceSand.workPerformed;
+
+        expect(reference.budgetExceeded).toEqual(false);
+        expect(unbudgetedWork).toBeGreaterThan(1000);
+
+        const physics = makePhysics();
+        const sand = physics.addLayer(VoxelPhysics.SAND);
+
+        fillSlab(sand);
+
+        const total = sand.length;
+        const limit = 500;
+
+        physics.update(1, 0, limit);
+
+        expect(physics.budgetExceeded).toEqual(true);
+        expect(sand.workPerformed).toBeLessThan(unbudgetedWork);
+
+        // The cap is honoured to within one y-plane of a chunk, which is where the
+        // sweep checks it - not to the exact probe.
+        expect(sand.workPerformed).toBeGreaterThanOrEqual(limit);
+        expect(sand.workPerformed).toBeLessThan(limit * 4);
+
+        // no grain is lost or duplicated by stopping mid-chunk
+        expect(sand.length).toEqual(total);
+    });
+
+    it('.update() - a work-budgeted simulation still settles, just over more ticks', () => {
+        const settle = (maxWork: number): { grains: number, ticks: number, aloft: number } => {
+            const physics = makePhysics();
+            const sand = physics.addLayer(VoxelPhysics.SAND);
+
+            for (let x = 0; x < 8; x++) {
+                for (let z = 0; z < 8; z++) {
+                    for (let y = 20; y < 26; y++) {
+                        sand.set(x, y, z);
+                    }
+                }
+            }
+
+            // generous tick ceiling - a budgeted run needs more of them
+            let ticks = 0;
+
+            while (sand.activeCount > 0 && ticks < 5000) {
+                physics.update(1, 0, maxWork);
+                ticks++;
+            }
+
+            let aloft = 0;
+
+            for (let x = 0; x < 32; x++) {
+                for (let z = 0; z < 32; z++) {
+                    for (let y = 8; y < 40; y++) {
+                        aloft += sand.get(x, y, z);
+                    }
+                }
+            }
+
+            return { grains: sand.grainCount, ticks: ticks, aloft: aloft };
+        };
+
+        const budgeted = settle(200);
+        const free = settle(0);
+
+        // Both come fully to rest on the floor with every grain accounted for.
+        // Not the same arrangement, though: stopping mid-chunk changes the order
+        // cells are contested in, so grains land in a different valid pile - the
+        // same latitude the move budget has always had.
+        expect(budgeted.grains).toEqual(free.grains);
+        expect(budgeted.aloft).toEqual(0);
+        expect(free.aloft).toEqual(0);
+
+        // and it genuinely took longer, which is the trade being made
+        expect(budgeted.ticks).toBeGreaterThan(free.ticks);
+        expect(budgeted.ticks).toBeLessThan(5000);
+    });
+
+    it('.update() - a work budget leaves the lighter layer a tick of its own', () => {
+        const physics = makePhysics();
+        const sand = physics.addLayer(VoxelPhysics.SAND);
+        const water = physics.addLayer(VoxelPhysics.WATER);
+
+        // sand below, water above: sand is denser so it steps first, and an
+        // undivided budget would let it spend the whole allowance
+        for (let x = 0; x < 24; x++) {
+            for (let z = 0; z < 24; z++) {
+                for (let y = 30; y < 36; y++) {
+                    sand.set(x, y, z);
+                }
+
+                for (let y = 36; y < 42; y++) {
+                    water.set(x, y, z);
+                }
+            }
+        }
+
+        let waterStepped = 0;
+
+        for (let i = 0; i < 20; i++) {
+            physics.update(1, 0, 400);
+
+            if (water.workPerformed > 0) {
+                waterStepped++;
+            }
+        }
+
+        // every tick, not merely most of them
+        expect(waterStepped).toEqual(20);
+    });
 });

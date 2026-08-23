@@ -215,6 +215,16 @@ export class VoxelPhysicsLayer {
     private _activeTotal = 0;
 
     /**
+     * Cell probes performed by the current sweep - the solver's unit of work.
+     *
+     * Incremented by every _IsOpen and _FindLighterOccupant call, which between
+     * them are what the sweep actually spends its time on. This is the quantity a
+     * caller wanting a bounded tick should budget, rather than grain movements:
+     * see step()'s maxWork parameter for why movements do not predict cost.
+     */
+    private _work = 0;
+
+    /**
      * Per-sweep neighbourhood caches - 27 slots covering the swept chunk and
      * its neighbours. _cacheBase holds the base world's BitVoxel storage,
      * _cacheChunks/_cacheElems hold every layer's chunks and storages, indexed
@@ -327,11 +337,32 @@ export class VoxelPhysicsLayer {
     }
 
     /**
+     * Returns the total number of grains (set BitVoxels) in this layer, in
+     * constant time.
+     *
+     * The running total set() and unset() already maintain, as opposed to
+     * length, which pop-counts every chunk. Prefer this everywhere; length
+     * remains for callers that want the count re-derived from storage.
+     */
+    public get grainCount(): number {
+        return this._grainTotal;
+    }
+
+    /**
      * Returns the number of active (possibly moving) grains in this layer.
      * Dormant scenes report 0 and cost nothing to update.
      */
     public get activeCount(): number {
         return this._activeTotal;
+    }
+
+    /**
+     * Returns the cell probes the most recent step() performed - the solver's
+     * unit of work, and what a caller budgeting for a bounded tick should
+     * measure its throughput in. See step()'s maxWork parameter.
+     */
+    public get workPerformed(): number {
+        return this._work;
     }
 
     /**
@@ -560,9 +591,14 @@ export class VoxelPhysicsLayer {
      * @param tick - The global simulation tick counter.
      * @param maxMoves - (Optional) Stop the sweep once this many grains have moved.
      * 0 or less means no limit. See VoxelPhysics.update() for the semantics.
+     * @param maxWork - (Optional) Stop the sweep once this many cell probes have
+     * been performed. 0 or less means no limit. This is the budget that actually
+     * bounds a tick's cost - see VoxelPhysics.update().
      * @returns - The number of grains that moved this tick.
      */
-    public step(tick: number, maxMoves = 0): number {
+    public step(tick: number, maxMoves = 0, maxWork = 0): number {
+        this._work = 0;
+
         if (this._activeChunks.size === 0) {
             return 0;
         }
@@ -609,7 +645,7 @@ export class VoxelPhysicsLayer {
                 continue;
             }
 
-            moves += this._SweepChunk(chunk, tick);
+            moves += this._SweepChunk(chunk, tick, maxWork);
 
             // fully dormant chunks leave the active set - empty ones also leave
             // the world so renderers can release their meshes
@@ -627,6 +663,10 @@ export class VoxelPhysicsLayer {
             // grains still awake, so the next tick resumes from here - the collapse
             // takes more ticks rather than one long one.
             if (maxMoves > 0 && moves >= maxMoves) {
+                break;
+            }
+
+            if (maxWork > 0 && this._work >= maxWork) {
                 break;
             }
         }
@@ -718,6 +758,8 @@ export class VoxelPhysicsLayer {
      * the base world and every layer.
      */
     private _IsOpen(lx: number, ly: number, lz: number): boolean {
+        this._work++;
+
         // outside the simulation bounds is solid - the floor and walls
         if (lx < this._ctxLoX || lx > this._ctxHiX || ly < this._ctxLoY || ly > this._ctxHiY || lz < this._ctxLoZ || lz > this._ctxHiZ) {
             return false;
@@ -753,6 +795,8 @@ export class VoxelPhysicsLayer {
      * out of bounds, held by the base world or held by an equal-or-denser layer.
      */
     private _FindLighterOccupant(lx: number, ly: number, lz: number): number {
+        this._work++;
+
         if (lx < this._ctxLoX || lx > this._ctxHiX || ly < this._ctxLoY || ly > this._ctxHiY || lz < this._ctxLoZ || lz > this._ctxHiZ) {
             return -1;
         }
@@ -1115,7 +1159,7 @@ export class VoxelPhysicsLayer {
      * Simulates one tick for a single chunk - the solver's hot loop. Sweeps
      * bottom-up over the active grains, moving each at most one cell.
      */
-    private _SweepChunk(chunk: PhysicsVoxelChunk, tick: number): number {
+    private _SweepChunk(chunk: PhysicsVoxelChunk, tick: number, workLimit: number): number {
         const chunkKey: MortonKey = chunk.key;
 
         this._ctxChunkX = chunkKey.x;
@@ -1155,6 +1199,15 @@ export class VoxelPhysicsLayer {
         // words containing active plane bits are visited - dormant regions are
         // skipped at word granularity.
         for (let y = 0; y < 16; y++) {
+            // Out of work budget mid-chunk. Every grain not reached still has its
+            // active bit set, so it is swept by the next tick - the chunk simply
+            // stays in the active set. Checked per y-plane rather than per grain:
+            // sixteen comparisons a chunk is free, and a plane is a small enough
+            // slice that no single one can overrun the budget by much.
+            if (workLimit > 0 && this._work >= workLimit) {
+                break;
+            }
+
             const planeBase: number = (y >> 2) * 32;
             const planeMask: number = planeMasks[y & 3];
 
