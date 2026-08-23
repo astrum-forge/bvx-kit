@@ -2,22 +2,19 @@ import {
     ArcRotateCamera,
     Color3,
     Color4,
-    ColorCurves,
-    DefaultRenderingPipeline,
-    DirectionalLight,
-    Engine,
-    HemisphericLight,
     Material,
     Matrix,
     Mesh,
     MeshBuilder,
     Scene,
-    ShadowGenerator,
     StandardMaterial,
     Vector3,
-    VertexData
+    VertexData,
+    WebGPUEngine,
+    type CascadedShadowGenerator
 } from "@babylonjs/core";
-import { GhibliToonPlugin, GhibliWaterPlugin, createSky } from "./ghibli";
+import { BVX_AO_KIND, GhibliToonPlugin, GhibliWaterPlugin } from "./ghibli";
+import { createRenderStack, type RenderStack } from "./render-stack";
 import {
     BVXSerializer,
     MortonKey,
@@ -67,6 +64,19 @@ export interface EditorStats {
     sandGrains: number;
     waterGrains: number;
     activeGrains: number;
+
+    /**
+     * Rendered frames per second, smoothed by the engine's own performance
+     * monitor.
+     */
+    fps: number;
+
+    /**
+     * Smoothed milliseconds the main thread spends inside a rendered frame -
+     * scene traversal, physics, meshing uploads and command encoding. The
+     * budget is 16.7 ms at 60 Hz.
+     */
+    cpuFrameTime: number;
 }
 
 /**
@@ -231,18 +241,70 @@ const FACE_TANGENTS: number[][] = [
 ];
 
 /**
- * Vertex brightness for the 4 baked ambient occlusion levels (0 = fully
+ * Vertex openness for the 4 baked ambient occlusion levels (0 = fully
  * occluded corner, 3 = fully open).
+ *
+ * Deeper than a renderer that multiplies AO into the albedo could afford. The
+ * toon ramp spends this on the ambient term only (see BVX_AO_KIND), so a fully
+ * enclosed corner drops to a third of its skylight without touching what the
+ * sun does to the same surface.
  */
-const AO_LEVELS: number[] = [0.55, 0.72, 0.86, 1.0];
+const AO_LEVELS: number[] = [0.42, 0.66, 0.86, 1.0];
 
 /**
- * Occupancy buffer dimensions - one chunk plus a 1-cell border (18^3 cells,
- * offset by +1 per axis).
+ * Occupancy buffer dimensions - one chunk plus a 3-cell border.
+ *
+ * The border used to be one cell, which is all the blocky path's exact corner
+ * test needs. The smooth path samples a blurred copy of this field up to ~1.7
+ * cells outside the surface, and reading past the border is what would make a
+ * chunk's AO change depending on which chunk it was baked from.
  */
-const OCC_DIMS = 18;
+const OCC_BORDER = 3;
+const OCC_DIMS = 16 + (OCC_BORDER * 2);
 const OCC_STRIDE_Y = OCC_DIMS;
 const OCC_STRIDE_Z = OCC_DIMS * OCC_DIMS;
+
+/**
+ * Distances along the surface normal, in BitVoxels, that the smooth path
+ * samples the blurred occupancy field at, and how much each contributes.
+ *
+ * Deliberately short range. Broad occlusion is the screen-space pass's job
+ * now; what it cannot do - and what a smooth voxel surface most needs - is
+ * crisp darkening in the millimetre-scale creases between terrace steps.
+ */
+const SMOOTH_AO_TAPS: number[] = [0.50, 1.05, 1.65];
+const SMOOTH_AO_WEIGHTS: number[] = [0.45, 0.33, 0.22];
+
+/**
+ * The sampled-field values that map to "fully open" and "fully enclosed".
+ * A flat exposed surface still reads well above zero, because half of the
+ * trilinear neighbourhood a hair outside the surface is the surface itself, so
+ * the low end is lifted to keep open ground from tinting.
+ */
+const SMOOTH_AO_OPEN = 0.16;
+const SMOOTH_AO_CLOSED = 0.72;
+
+/**
+ * The same mapping for the water lane's shoreline mask, read at the vertex
+ * rather than swept along the normal. A wider band, because surf should reach
+ * a little way out from the bank rather than hug it.
+ */
+const SHORE_OPEN = 0.02;
+const SHORE_CLOSED = 0.55;
+
+/**
+ * How far a smooth vertex's colour is pulled toward the average of its
+ * one-ring neighbours.
+ *
+ * Surface-nets vertices take their colour from the nearest solid corner of
+ * their cell, which snaps hard from one palette entry to the next along a
+ * material boundary and speckles wherever the two interleave. One relaxation
+ * pass over the triangle topology turns that into a one-vertex-wide blend -
+ * a painted transition rather than a jagged one - for the cost of a single
+ * walk over the index buffer.
+ */
+const SMOOTH_COLOR_RELAX = 0.55;
+
 
 /**
  * Camera limits.
@@ -260,15 +322,18 @@ const CAMERA_MAX_BETA = Math.PI - 0.05;
  */
 export class VoxelEditor {
     private readonly _canvas: HTMLCanvasElement;
-    private readonly _engine: Engine;
+    private readonly _engine: WebGPUEngine;
     private readonly _scene: Scene;
     private readonly _camera: ArcRotateCamera;
     private readonly _pool: MesherPool;
     private readonly _resizeObserver: ResizeObserver;
-    private _shadows!: ShadowGenerator;
+
+    // lights, shadows, ground, sky and the post chain
+    private readonly _render: RenderStack;
+    private readonly _shadows: CascadedShadowGenerator;
 
     // direction toward the sun - drives the water glints and the sky dome
-    private _sunDirection!: Vector3;
+    private readonly _sunDirection: Vector3;
 
     // manual camera navigation state
     private _navMode: "none" | "orbit" | "pan" = "none";
@@ -318,6 +383,14 @@ export class VoxelEditor {
     private _colorIndex = 6;
     private _renderMode: RenderMode = "blocky";
     private _smoothing = 1;
+    // Off by default. It is a full extra pass over the scene and measures
+    // about 5 ms of a 14 ms frame while a simulation is remeshing - a third of
+    // the budget for an effect the baked occlusion already approximates. It is
+    // one click away when a still is worth the frame time.
+    // On by default. Measured on a heavy sand-and-water pour it costs about
+    // 1.3 ms of a 13.9 ms frame - the cheapest of the additions here, and the
+    // one that puts contact shading where baking cannot reach.
+    private _occlusionEnabled = true;
 
     // hover cursor
     private readonly _cursor: Mesh;
@@ -336,13 +409,25 @@ export class VoxelEditor {
     private readonly _scratchPropagate = new Set<number>();
 
     // reusable occupancy buffer for ambient occlusion baking - one chunk plus a
-    // 1-cell border, holding the union of base world and sand occupancy
+    // 3-cell border, holding the union of base world and sand occupancy
     private readonly _occupancy = new Uint8Array(OCC_DIMS * OCC_DIMS * OCC_DIMS);
+
+    // the 3x3x3 neighbourhood of BitVoxel storages the occupancy build reads,
+    // held across calls so the hot path allocates nothing
+    private readonly _occlusionBase: (Uint32Array | null)[] = new Array(27).fill(null);
+    private readonly _occlusionSand: (Uint32Array | null)[] = new Array(27).fill(null);
+
+    // per-vertex accumulators reused by the smooth colour relaxation pass
+    private _relaxColors = new Float32Array(0);
+    private _relaxWeights = new Float32Array(0);
 
     // throttled stats publishing - _statsDirty marks a dropped publish that the
     // render loop flushes once the throttle window has passed
     private _statsTimer = 0;
     private _statsDirty = false;
+
+    // exponentially smoothed main-thread cost of a rendered frame, in ms
+    private _cpuFrameTime = 0;
 
     /**
      * Invoked whenever the scene statistics change.
@@ -359,18 +444,65 @@ export class VoxelEditor {
      */
     public onHistoryChanged: ((canUndo: boolean, canRedo: boolean) => void) | null = null;
 
-    constructor(canvas: HTMLCanvasElement) {
+    /**
+     * Creates an editor on the provided canvas.
+     *
+     * The engine is WebGPU-only and comes up asynchronously (adapter and device
+     * are both promises), which is why construction runs through here rather
+     * than a plain `new`. Rejects when the browser has no WebGPU support.
+     */
+    public static async create(canvas: HTMLCanvasElement): Promise<VoxelEditor> {
+        if (!await WebGPUEngine.IsSupportedAsync) {
+            throw new Error("navigator.gpu did not return a usable adapter.");
+        }
+
+        const engine = await WebGPUEngine.CreateAsync(canvas, {
+            // 4x MSAA on the main pass. Practically free on a tile-based GPU
+            // and the single largest quality win available to a renderer whose
+            // subject is a field of hard-edged cubes.
+            antialias: true,
+            stencil: false,
+            powerPreference: "high-performance",
+            adaptToDeviceRatio: true,
+            enableGPUDebugMarkers: false,
+
+            // requests every feature the adapter already advertises, which is
+            // how the device ends up with timestamp-query and therefore how the
+            // inspector gets a real GPU frame time rather than a guess
+            enableAllFeatures: true
+        });
+
+        return new VoxelEditor(canvas, engine);
+    }
+
+    private constructor(canvas: HTMLCanvasElement, engine: WebGPUEngine) {
         this._canvas = canvas;
-        this._engine = new Engine(canvas, true, { preserveDrawingBuffer: false, stencil: false }, true);
+        this._engine = engine;
         this._scene = new Scene(this._engine);
         this._pool = new MesherPool();
 
         const scene = this._scene;
 
+        // WebGPU's non-compatibility mode: Babylon records each mesh's draw
+        // into a reusable render bundle instead of re-encoding it every frame.
+        // This scene is exactly the shape that pays off - around five hundred
+        // small static meshes, each drawn again per shadow cascade and once
+        // more into the occlusion pre-pass - and it measures about 2.2 ms off
+        // a 10.7 ms frame here. The catch is that a cached bundle holds the
+        // mesh's buffers, so replacing a chunk's geometry has to invalidate it;
+        // _uploadMesh does that explicitly.
+        this._engine.compatibilityMode = false;
+
         // right-handed to match the counter-clockwise outward winding produced
         // by the bvx-kit geometry generators with flipped = false
         scene.useRightHandedSystem = true;
-        scene.clearColor = Color4.FromHexString("#bfdcecff");
+
+        // nothing in the scene is pickable through Babylon (the editor casts
+        // its own rays through the voxel grid), so the per-move scene pick is
+        // pure overhead
+        scene.skipPointerMovePicking = true;
+        scene.skipPointerDownPicking = true;
+        scene.skipPointerUpPicking = true;
 
         // orbit camera - all navigation input is handled manually (see the
         // pointer/wheel handlers) so mouse and trackpad devices both get
@@ -379,81 +511,17 @@ export class VoxelEditor {
         const target = new Vector3(regionUnits / 2, regionUnits / 8, regionUnits / 2);
 
         this._camera = new ArcRotateCamera("camera", -Math.PI / 3, Math.PI / 3, regionUnits * 1.1, target, scene);
-        this._camera.minZ = 0.05;
 
-        // lighting - a blue sky dome with warm ground bounce, a warm
-        // shadow-casting sun and a faint cool fill from the opposite side. The
-        // toon ramps in the Ghibli plugins are tuned to this rig's intensities.
-        const ambient = new HemisphericLight("ambient", new Vector3(0.2, 1.0, 0.3), scene);
-        ambient.intensity = 0.55;
-        ambient.diffuse = new Color3(0.68, 0.80, 0.95);
-        ambient.groundColor = new Color3(0.50, 0.47, 0.38);
-        ambient.specular = Color3.Black();
+        // A tight depth range. The old 0.05 - 10000 span spread the depth
+        // buffer over five orders of magnitude, which is what let the shadow
+        // cascades and the water pre-pass fight each other; 0.1 - 8x the
+        // region still comfortably contains the sky dome.
+        this._camera.minZ = 0.1;
+        this._camera.maxZ = regionUnits * 14;
 
-        const key = new DirectionalLight("key", new Vector3(-0.55, -0.8, -0.35), scene);
-        key.intensity = 1.15;
-        key.diffuse = new Color3(1.0, 0.94, 0.78);
-        key.position = new Vector3(regionUnits * 1.2, regionUnits * 1.6, regionUnits * 1.1);
-
-        const fill = new DirectionalLight("fill", new Vector3(0.6, -0.25, 0.5), scene);
-        fill.intensity = 0.12;
-        fill.diffuse = new Color3(0.55, 0.65, 0.90);
-        fill.specular = Color3.Black();
-
-        // direction toward the sun, shared by the water glints and the sky
-        this._sunDirection = key.direction.negate().normalize();
-
-        // soft (PCF) shadows from the key light
-        this._shadows = new ShadowGenerator(2048, key);
-        this._shadows.usePercentageCloserFiltering = true;
-        this._shadows.filteringQuality = ShadowGenerator.QUALITY_MEDIUM;
-        this._shadows.bias = 0.0008;
-        this._shadows.normalBias = 0.02;
-
-        // a soft meadow ground plane anchors the scene and catches shadows,
-        // shaded with the same toon ramp as the voxels
-        const ground = MeshBuilder.CreateGround("ground", { width: regionUnits * 6, height: regionUnits * 6 }, scene);
-        ground.position.set(regionUnits / 2, -0.02, regionUnits / 2);
-        ground.isPickable = false;
-        ground.receiveShadows = true;
-
-        const groundMaterial = new StandardMaterial("ground-mat", scene);
-        groundMaterial.diffuseColor = Color3.FromHexString("#94bd72");
-        groundMaterial.specularColor = Color3.Black();
-        ground.material = groundMaterial;
-
-        new GhibliToonPlugin(groundMaterial);
-
-        // the gradient sky dome with drifting clouds and the sun
-        createSky(scene, new Vector3(regionUnits / 2, 0, regionUnits / 2), this._sunDirection);
-
-        // soft atmospheric haze toward the horizon colour, starting well
-        // beyond the editable region
-        scene.fogMode = Scene.FOGMODE_LINEAR;
-        scene.fogStart = regionUnits * 2.5;
-        scene.fogEnd = regionUnits * 6;
-        scene.fogColor = Color3.FromHexString("#dfe8dd");
-
-        // post-processing - anti-aliasing, gentle contrast/saturation, a soft
-        // bloom for the water glints and a light vignette
-        const pipeline = new DefaultRenderingPipeline("post", false, scene, [this._camera]);
-        pipeline.fxaaEnabled = true;
-        pipeline.bloomEnabled = true;
-        pipeline.bloomThreshold = 0.85;
-        pipeline.bloomWeight = 0.18;
-        pipeline.bloomKernel = 48;
-        pipeline.bloomScale = 0.5;
-        pipeline.imageProcessingEnabled = true;
-        pipeline.imageProcessing.contrast = 1.06;
-        pipeline.imageProcessing.exposure = 1.02;
-        pipeline.imageProcessing.vignetteEnabled = true;
-        pipeline.imageProcessing.vignetteWeight = 1.1;
-        pipeline.imageProcessing.vignetteColor = new Color4(0, 0, 0, 0);
-
-        const curves = new ColorCurves();
-        curves.globalSaturation = 18;
-        pipeline.imageProcessing.colorCurvesEnabled = true;
-        pipeline.imageProcessing.colorCurves = curves;
+        this._render = createRenderStack(scene, this._camera, regionUnits, this._occlusionEnabled);
+        this._shadows = this._render.shadows;
+        this._sunDirection = this._render.sunDirection;
 
         this._buildGrid();
 
@@ -501,12 +569,28 @@ export class VoxelEditor {
             this._updateCameraGoal();
             this._updatePhysics();
 
-            if (this._statsDirty && performance.now() - this._statsTimer >= 250) {
+            // republish on a slow cadence even when nothing changed, so the
+            // frame-rate readout keeps ticking on an idle scene
+            if (performance.now() - this._statsTimer >= (this._statsDirty ? 250 : 500)) {
                 this._publishStats(true);
             }
         });
 
-        this._engine.runRenderLoop(() => scene.render());
+        // The GPU's own frame time would be the number to show here, but Chrome
+        // quantises WebGPU timestamp queries to zero unless the developer
+        // features flag is set, so the honest measurement available to every
+        // user is what the main thread spends producing the frame.
+        this._engine.runRenderLoop(() => {
+            const started = performance.now();
+
+            scene.render();
+
+            const elapsed = performance.now() - started;
+
+            this._cpuFrameTime = this._cpuFrameTime === 0
+                ? elapsed
+                : this._cpuFrameTime + ((elapsed - this._cpuFrameTime) * 0.1);
+        });
     }
 
     // ---------------------------------------------------------------- settings
@@ -581,6 +665,38 @@ export class VoxelEditor {
                 renderList.push(mesh);
             }
         }
+    }
+
+    /**
+     * Whether the base world holds no chunks at all.
+     */
+    public get isEmpty(): boolean {
+        // HashGrid.size is the bucket count, which is non-zero from
+        // construction; length is the number of chunks actually stored
+        return this._world.chunks.length === 0;
+    }
+
+    /**
+     * Whether the screen-space ambient occlusion pass is running.
+     */
+    public get occlusionEnabled(): boolean {
+        return this._occlusionEnabled;
+    }
+
+    public setOcclusionEnabled(enabled: boolean): void {
+        if (this._occlusionEnabled === enabled) {
+            return;
+        }
+
+        this._occlusionEnabled = enabled;
+        this._render.setOcclusionEnabled(enabled);
+    }
+
+    /**
+     * Whether the device supports the screen-space occlusion pass at all.
+     */
+    public get occlusionSupported(): boolean {
+        return this._render.occlusion !== null;
     }
 
     public get smoothing(): number {
@@ -2231,17 +2347,29 @@ export class VoxelEditor {
 
     /**
      * Fills the reusable occupancy buffer for the chunk at the provided key -
-     * the chunk's cells plus a 1-cell border, as the union of the base world
-     * and the sand layer. Used to bake per-vertex ambient occlusion.
+     * the chunk's cells plus `border` cells around them, as the union of the
+     * base world and the sand layer. Used to bake per-vertex ambient occlusion.
+     *
+     * The border is a parameter because the two paths need very different
+     * reach and this loop is hot: it runs once per remeshed chunk, and a
+     * simulation pouring sand and water remeshes tens of chunks per frame.
+     * Filling the smooth path's 3-cell border for the blocky path, which never
+     * reads past 1, was doubling the work for nothing.
      */
-    private _buildOcclusion(mortonKey: MortonKey): Uint8Array {
+    private _buildOcclusion(mortonKey: MortonKey, border: number): Uint8Array {
         const occupancy = this._occupancy;
 
         occupancy.fill(0);
 
-        // gather the 3x3x3 neighbourhood of BitVoxel storages for both worlds
-        const baseElements: (Uint32Array | null)[] = [];
-        const sandElements: (Uint32Array | null)[] = [];
+        // Gather the 3x3x3 neighbourhood of BitVoxel storages for both worlds.
+        // Into reused slots, not fresh arrays: this runs once per remeshed
+        // chunk and a running simulation remeshes tens of chunks per frame, so
+        // two short-lived arrays here is a steady drip of garbage through the
+        // busiest path in the editor.
+        const baseElements = this._occlusionBase;
+        const sandElements = this._occlusionSand;
+
+        let neighbour = 0;
 
         for (let ox = -1; ox <= 1; ox++) {
             for (let oy = -1; oy <= 1; oy++) {
@@ -2251,21 +2379,27 @@ export class VoxelEditor {
                     const baseChunk = this._world.get(this._scratchKey);
                     const sandChunk = this._sand.world.get(this._scratchKey);
 
-                    baseElements.push(baseChunk !== null ? baseChunk.layer.bitArray.elements : null);
-                    sandElements.push(sandChunk !== null ? sandChunk.layer.bitArray.elements : null);
+                    baseElements[neighbour] = baseChunk !== null ? baseChunk.layer.bitArray.elements : null;
+                    sandElements[neighbour] = sandChunk !== null ? sandChunk.layer.bitArray.elements : null;
+                    neighbour++;
                 }
             }
         }
 
-        for (let x = -1; x <= 16; x++) {
+        // the border stays under a chunk wide, so (coord >> 4) + 1 still lands
+        // on the right slot of the 3x3x3 neighbourhood for every cell sampled
+        const low = -border;
+        const high = 15 + border;
+
+        for (let x = low; x <= high; x++) {
             const sx = (x >> 4) + 1;
             const lx = x & 15;
 
-            for (let y = -1; y <= 16; y++) {
+            for (let y = low; y <= high; y++) {
                 const sy = (y >> 4) + 1;
                 const ly = y & 15;
 
-                for (let z = -1; z <= 16; z++) {
+                for (let z = low; z <= high; z++) {
                     const slot = (sx * 9) + (sy * 3) + ((z >> 4) + 1);
                     const lz = z & 15;
 
@@ -2277,13 +2411,58 @@ export class VoxelEditor {
                     const sand = sandElements[slot];
 
                     if ((base !== null && (base[word] & mask) !== 0) || (sand !== null && (sand[word] & mask) !== 0)) {
-                        occupancy[(x + 1) + ((y + 1) * OCC_STRIDE_Y) + ((z + 1) * OCC_STRIDE_Z)] = 1;
+                        occupancy[(x + OCC_BORDER) + ((y + OCC_BORDER) * OCC_STRIDE_Y) + ((z + OCC_BORDER) * OCC_STRIDE_Z)] = 1;
                     }
                 }
             }
         }
 
         return occupancy;
+    }
+
+    /**
+     * Trilinearly samples the occupancy field at chunk-local BitVoxel
+     * coordinates, clamped to the buffer.
+     *
+     * Interpolating between cells is what makes a binary field usable as a
+     * continuous occlusion measure - and it is the whole fix for the mottling
+     * the old per-cell corner count produced.
+     */
+    private _sampleOcclusionField(field: Float32Array | Uint8Array, x: number, y: number, z: number): number {
+        const limit = OCC_DIMS - 2;
+
+        const fx = Math.min(limit, Math.max(0, x + OCC_BORDER));
+        const fy = Math.min(limit, Math.max(0, y + OCC_BORDER));
+        const fz = Math.min(limit, Math.max(0, z + OCC_BORDER));
+
+        const ix = fx | 0;
+        const iy = fy | 0;
+        const iz = fz | 0;
+
+        const tx = fx - ix;
+        const ty = fy - iy;
+        const tz = fz - iz;
+
+        const base = ix + (iy * OCC_STRIDE_Y) + (iz * OCC_STRIDE_Z);
+
+        const c000 = field[base];
+        const c100 = field[base + 1];
+        const c010 = field[base + OCC_STRIDE_Y];
+        const c110 = field[base + OCC_STRIDE_Y + 1];
+        const c001 = field[base + OCC_STRIDE_Z];
+        const c101 = field[base + OCC_STRIDE_Z + 1];
+        const c011 = field[base + OCC_STRIDE_Z + OCC_STRIDE_Y];
+        const c111 = field[base + OCC_STRIDE_Z + OCC_STRIDE_Y + 1];
+
+        const x00 = c000 + ((c100 - c000) * tx);
+        const x10 = c010 + ((c110 - c010) * tx);
+        const x01 = c001 + ((c101 - c001) * tx);
+        const x11 = c011 + ((c111 - c011) * tx);
+
+        const y0 = x00 + ((x10 - x00) * ty);
+        const y1 = x01 + ((x11 - x01) * ty);
+
+        return y0 + ((y1 - y0) * tz);
     }
 
     /**
@@ -2306,10 +2485,16 @@ export class VoxelEditor {
         const positions = new Float32Array(faceCount * 4 * 3);
         const normals = new Float32Array(faceCount * 4 * 3);
         const colors = new Float32Array(faceCount * 4 * 4);
+        const occlusion = new Float32Array(faceCount * 4);
         const indices = new Uint32Array(faceCount * 6);
 
-        // baked corner ambient occlusion - skipped for translucent water
-        const occupancy = lane !== this._waterLane ? this._buildOcclusion(mortonKey) : null;
+        // Baked corner ambient occlusion, from the union of the base world and
+        // the sand layer. Water bakes it too: the same "how much solid is next
+        // to this face" measure is a shoreline mask there, which is what the
+        // water shader grows surf from - but at a quarter of the cost, see
+        // below.
+        const isWater = lane === this._waterLane;
+        const occupancy = this._buildOcclusion(mortonKey, 1);
         const cornerAO: number[] = [3, 3, 3, 3];
 
         let vertex = 0;
@@ -2346,7 +2531,35 @@ export class VoxelEditor {
                 // ambient occlusion per corner - each corner samples the two
                 // edge neighbours and the diagonal neighbour in the layer the
                 // face looks into
-                if (occupancy !== null) {
+                if (isWater) {
+                    // Water needs only a shoreline mask, and the foam it feeds
+                    // is broken up by noise anyway, so per-corner precision is
+                    // wasted: four samples around the face rather than twelve.
+                    // Water is also the busiest lane by far while a simulation
+                    // runs, so this is the loop that matters most.
+                    const tangents = FACE_TANGENTS[face];
+                    const a1 = tangents[0];
+                    const a2 = tangents[1];
+                    const nx = x + normal[0];
+                    const ny = y + normal[1];
+                    const nz = z + normal[2];
+
+                    let solid = 0;
+
+                    for (let side = 0; side < 4; side++) {
+                        const axis = side < 2 ? a1 : a2;
+                        const step = (side & 1) === 0 ? 1 : -1;
+
+                        const sx = nx + (axis === 0 ? step : 0);
+                        const sy = ny + (axis === 1 ? step : 0);
+                        const sz = nz + (axis === 2 ? step : 0);
+
+                        solid += occupancy[(sx + OCC_BORDER) + ((sy + OCC_BORDER) * OCC_STRIDE_Y) + ((sz + OCC_BORDER) * OCC_STRIDE_Z)];
+                    }
+
+                    cornerAO[0] = cornerAO[1] = cornerAO[2] = cornerAO[3] = 3 - Math.min(3, solid);
+                }
+                else {
                     const tangents = FACE_TANGENTS[face];
                     const nx = x + normal[0];
                     const ny = y + normal[1];
@@ -2365,15 +2578,12 @@ export class VoxelEditor {
                         const s2y = ny + (a2 === 1 ? d2 : 0);
                         const s2z = nz + (a2 === 2 ? d2 : 0);
 
-                        const side1 = occupancy[(s1x + 1) + ((s1y + 1) * OCC_STRIDE_Y) + ((s1z + 1) * OCC_STRIDE_Z)];
-                        const side2 = occupancy[(s2x + 1) + ((s2y + 1) * OCC_STRIDE_Y) + ((s2z + 1) * OCC_STRIDE_Z)];
-                        const diagonal = occupancy[(s1x + s2x - nx + 1) + ((s1y + s2y - ny + 1) * OCC_STRIDE_Y) + ((s1z + s2z - nz + 1) * OCC_STRIDE_Z)];
+                        const side1 = occupancy[(s1x + OCC_BORDER) + ((s1y + OCC_BORDER) * OCC_STRIDE_Y) + ((s1z + OCC_BORDER) * OCC_STRIDE_Z)];
+                        const side2 = occupancy[(s2x + OCC_BORDER) + ((s2y + OCC_BORDER) * OCC_STRIDE_Y) + ((s2z + OCC_BORDER) * OCC_STRIDE_Z)];
+                        const diagonal = occupancy[(s1x + s2x - nx + OCC_BORDER) + ((s1y + s2y - ny + OCC_BORDER) * OCC_STRIDE_Y) + ((s1z + s2z - nz + OCC_BORDER) * OCC_STRIDE_Z)];
 
                         cornerAO[c] = (side1 !== 0 && side2 !== 0) ? 0 : 3 - (side1 + side2 + diagonal);
                     }
-                }
-                else {
-                    cornerAO[0] = cornerAO[1] = cornerAO[2] = cornerAO[3] = 3;
                 }
 
                 for (let c = 0; c < 4; c++) {
@@ -2387,13 +2597,25 @@ export class VoxelEditor {
                     normals[write + 1] = normal[1];
                     normals[write + 2] = normal[2];
 
-                    const brightness = AO_LEVELS[cornerAO[c]];
-                    const colorWrite = vertex * 4;
+                    const openness = AO_LEVELS[cornerAO[c]];
 
-                    colors[colorWrite] = rgb[0] * brightness;
-                    colors[colorWrite + 1] = rgb[1] * brightness;
-                    colors[colorWrite + 2] = rgb[2] * brightness;
-                    colors[colorWrite + 3] = 1.0;
+                    if (isWater) {
+                        // water spends the same measure on surf, not shading
+                        this._writeShore(colors, vertex, 1.0 - openness);
+                    }
+                    else {
+                        const colorWrite = vertex * 4;
+
+                        // albedo stays exactly the palette entry - occlusion
+                        // rides in its own stream so the toon ramp can spend it
+                        // on the ambient term alone
+                        colors[colorWrite] = rgb[0];
+                        colors[colorWrite + 1] = rgb[1];
+                        colors[colorWrite + 2] = rgb[2];
+                        colors[colorWrite + 3] = 1.0;
+                    }
+
+                    occlusion[vertex] = openness;
 
                     vertex++;
                 }
@@ -2421,7 +2643,7 @@ export class VoxelEditor {
             }
         }
 
-        this._uploadMesh(lane, chunkKey, mortonKey, positions, normals, colors, indices, faceCount * 2);
+        this._uploadMesh(lane, chunkKey, mortonKey, positions, normals, colors, occlusion, indices, faceCount * 2);
     }
 
     /**
@@ -2453,12 +2675,17 @@ export class VoxelEditor {
         const positions = new Float32Array(faceCount * 4 * 3);
         const normals = new Float32Array(faceCount * 4 * 3);
         const colors = new Float32Array(faceCount * 4 * 4);
+        const occlusion = new Float32Array(faceCount * 4);
         const indices = new Uint32Array(faceCount * 8);
 
         // The line colour comes from the lane's emissive wire material, so the vertex
         // colours are left white - they exist only so a mesh reused from the blocky
-        // mode does not keep a stale colour buffer that would tint the lines.
+        // mode does not keep a stale colour buffer that would tint the lines. The
+        // occlusion stream is unused by the unlit wire material but must still match
+        // the vertex count, or a mesh reused from another mode keeps a buffer of the
+        // wrong length.
         colors.fill(1.0);
+        occlusion.fill(1.0);
 
         let vertex = 0;
         let indexCount = 0;
@@ -2512,7 +2739,7 @@ export class VoxelEditor {
             }
         }
 
-        this._uploadMesh(lane, chunkKey, mortonKey, positions, normals, colors, indices, faceCount * 2);
+        this._uploadMesh(lane, chunkKey, mortonKey, positions, normals, colors, occlusion, indices, faceCount * 2);
     }
 
     /**
@@ -2532,49 +2759,39 @@ export class VoxelEditor {
 
         const vertexCount = vertices.length / 3;
         const colors = new Float32Array(vertexCount * 4);
+        const occlusion = new Float32Array(vertexCount);
 
-        // crevice ambient occlusion from the surrounding occupancy - skipped
-        // for translucent water
-        const occupancy = lane !== this._waterLane ? this._buildOcclusion(mortonKey) : null;
+        const isWater = lane === this._waterLane;
 
-        const creviceAO = (cx: number, cy: number, cz: number): number => {
-            if (occupancy === null) {
-                return 1.0;
-            }
-
-            // count the solid corners of the vertex's surface cell - the more
-            // enclosed the cell, the darker the vertex
-            let solid = 0;
-
-            for (let corner = 0; corner < 8; corner++) {
-                const sx = Math.min(16, Math.max(-1, cx + (corner & 1)));
-                const sy = Math.min(16, Math.max(-1, cy + ((corner >> 1) & 1)));
-                const sz = Math.min(16, Math.max(-1, cz + ((corner >> 2) & 1)));
-
-                solid += occupancy[(sx + 1) + ((sy + 1) * OCC_STRIDE_Y) + ((sz + 1) * OCC_STRIDE_Z)];
-            }
-
-            return 1.0 - (Math.max(0, solid - 2) * 0.05);
-        };
+        // Crevice ambient occlusion from a blurred copy of the surrounding
+        // occupancy. This replaces a count of the eight solid corners of the
+        // vertex's cell, which was the single largest source of the mottled
+        // "dirty" surface: adjacent vertices sit in adjacent cells, and an
+        // integer corner count changes by a whole step between them however
+        // gently the geometry actually turns.
+        //
+        // Both lanes read the raw occupancy, trilinearly. An earlier version
+        // blurred it first, which was the single most expensive thing the
+        // editor did while a simulation ran - about 9 ms of a 32 ms frame - and
+        // it turns out to buy nothing: what removed the mottling was the
+        // trilinear interpolation, not the blur. Sampling a binary field
+        // between its cells is already continuous, and the three taps along the
+        // normal give the width the blur was there to provide.
+        //
+        // Water needs only the 1-cell border, because it reads the field at the
+        // vertex rather than sweeping it outward.
+        const field = this._buildOcclusion(mortonKey, isWater ? 1 : OCC_BORDER);
 
         if (lane.color !== null) {
-            // flat lane colour with crevice shading
+            // flat lane colour
             const [r, g, b] = lane.color;
 
             for (let i = 0; i < vertexCount; i++) {
-                const read = i * 3;
-
-                const ao = creviceAO(
-                    Math.floor(vertices[read] / BIT_VOXEL_SIZE - 0.5),
-                    Math.floor(vertices[read + 1] / BIT_VOXEL_SIZE - 0.5),
-                    Math.floor(vertices[read + 2] / BIT_VOXEL_SIZE - 0.5)
-                );
-
                 const write = i * 4;
 
-                colors[write] = r * ao;
-                colors[write + 1] = g * ao;
-                colors[write + 2] = b * ao;
+                colors[write] = r;
+                colors[write + 1] = g;
+                colors[write + 2] = b;
                 colors[write + 3] = 1.0;
             }
         }
@@ -2587,9 +2804,9 @@ export class VoxelEditor {
                 const read = i * 3;
 
                 // the surface cell that owns this vertex (min-corner sample)
-                const px = vertices[read] / BIT_VOXEL_SIZE - 0.5;
-                const py = vertices[read + 1] / BIT_VOXEL_SIZE - 0.5;
-                const pz = vertices[read + 2] / BIT_VOXEL_SIZE - 0.5;
+                const px = (vertices[read] / BIT_VOXEL_SIZE) - 0.5;
+                const py = (vertices[read + 1] / BIT_VOXEL_SIZE) - 0.5;
+                const pz = (vertices[read + 2] / BIT_VOXEL_SIZE) - 0.5;
 
                 const cx = Math.floor(px);
                 const cy = Math.floor(py);
@@ -2627,23 +2844,168 @@ export class VoxelEditor {
                     rgb = PALETTE[(meta ?? 0) % PALETTE.length].rgb;
                 }
 
-                const ao = creviceAO(cx, cy, cz);
                 const write = i * 4;
 
-                colors[write] = rgb[0] * ao;
-                colors[write + 1] = rgb[1] * ao;
-                colors[write + 2] = rgb[2] * ao;
+                colors[write] = rgb[0];
+                colors[write + 1] = rgb[1];
+                colors[write + 2] = rgb[2];
                 colors[write + 3] = 1.0;
+            }
+
+            this._relaxSmoothColors(colors, indices, vertexCount);
+        }
+
+        for (let i = 0; i < vertexCount; i++) {
+            const read = i * 3;
+
+            const px = vertices[read] / BIT_VOXEL_SIZE;
+            const py = vertices[read + 1] / BIT_VOXEL_SIZE;
+            const pz = vertices[read + 2] / BIT_VOXEL_SIZE;
+
+            let occluded: number;
+
+            if (isWater) {
+                // A water surface is flat and faces the sky, so sweeping along
+                // its normal finds nothing but air. What matters there is what
+                // is beside it, so the field is read where the vertex actually
+                // sits - high against a bank, zero in open water.
+                occluded = this._sampleOcclusionField(field, px, py, pz);
+            }
+            else {
+                const nx = normals[read];
+                const ny = normals[read + 1];
+                const nz = normals[read + 2];
+
+                // walk outward along the normal - what is still solid out there
+                // is what is occluding this point
+                occluded = 0;
+
+                for (let tap = 0; tap < SMOOTH_AO_TAPS.length; tap++) {
+                    const distance = SMOOTH_AO_TAPS[tap];
+
+                    occluded += this._sampleOcclusionField(
+                        field,
+                        px + (nx * distance),
+                        py + (ny * distance),
+                        pz + (nz * distance)
+                    ) * SMOOTH_AO_WEIGHTS[tap];
+                }
+            }
+
+            const open = isWater ? SHORE_OPEN : SMOOTH_AO_OPEN;
+            const closed = isWater ? SHORE_CLOSED : SMOOTH_AO_CLOSED;
+            const t = Math.min(1, Math.max(0, (occluded - open) / (closed - open)));
+
+            // smoothstep, so open ground stays exactly open and the falloff
+            // into a crease has no visible onset
+            const openness = 1.0 - (t * t * (3 - (2 * t)));
+
+            occlusion[i] = openness;
+
+            if (isWater) {
+                this._writeShore(colors, i, 1.0 - openness);
             }
         }
 
-        this._uploadMesh(lane, chunkKey, mortonKey, vertices, normals, colors, indices, indices.length / 3);
+        if (isWater) {
+            // Sampled at a single point against a binary field, the shoreline
+            // mask comes out nearly binary too - present, but with no gradient
+            // for the surf to fade along. The same one-ring relaxation the
+            // solids use for colour turns it into the soft rim it needs to be,
+            // for one walk over the index buffer rather than the several extra
+            // field samples per vertex it would otherwise take.
+            this._relaxSmoothColors(colors, indices, vertexCount);
+        }
+
+        this._uploadMesh(lane, chunkKey, mortonKey, vertices, normals, colors, occlusion, indices, indices.length / 3);
+    }
+
+    /**
+     * Stores a water vertex's shoreline proximity (0 = open water, 1 = against
+     * a bank) in its vertex colour.
+     *
+     * The water shader composes its colour from depth, fresnel and light and
+     * never reads the albedo, so the colour buffer is free real estate on that
+     * lane. It is used rather than the dedicated occlusion attribute because
+     * the water material runs a depth pre-pass: adding an attribute makes its
+     * two passes disagree about the vertex layout, and on WebGPU that does not
+     * fail loudly - it invalidates the command encoder and the entire frame,
+     * scene and all, silently fails to present.
+     */
+    private _writeShore(colors: Float32Array, vertex: number, shore: number): void {
+        const write = vertex * 4;
+
+        colors[write] = shore;
+        colors[write + 1] = shore;
+        colors[write + 2] = shore;
+        colors[write + 3] = 1.0;
+    }
+
+    /**
+     * Blends each smooth vertex's colour toward the average of the vertices it
+     * shares a triangle edge with.
+     *
+     * Surface-nets colours are sampled per cell, so a material boundary lands
+     * on the mesh as a hard, jagged step. One relaxation pass over the index
+     * buffer turns it into a one-vertex-wide gradient without any world
+     * lookups - the whole pass is a single walk over the triangles plus a walk
+     * over the vertices.
+     */
+    private _relaxSmoothColors(colors: Float32Array, indices: Uint32Array, vertexCount: number): void {
+        if (this._relaxWeights.length < vertexCount) {
+            this._relaxColors = new Float32Array(vertexCount * 3);
+            this._relaxWeights = new Float32Array(vertexCount);
+        }
+
+        const sums = this._relaxColors;
+        const weights = this._relaxWeights;
+
+        sums.fill(0, 0, vertexCount * 3);
+        weights.fill(0, 0, vertexCount);
+
+        for (let i = 0; i < indices.length; i += 3) {
+            for (let edge = 0; edge < 3; edge++) {
+                const from = indices[i + edge];
+                const to = indices[i + ((edge + 1) % 3)];
+
+                const readTo = to * 4;
+                const readFrom = from * 4;
+                const writeFrom = from * 3;
+                const writeTo = to * 3;
+
+                sums[writeFrom] += colors[readTo];
+                sums[writeFrom + 1] += colors[readTo + 1];
+                sums[writeFrom + 2] += colors[readTo + 2];
+                weights[from]++;
+
+                sums[writeTo] += colors[readFrom];
+                sums[writeTo + 1] += colors[readFrom + 1];
+                sums[writeTo + 2] += colors[readFrom + 2];
+                weights[to]++;
+            }
+        }
+
+        for (let i = 0; i < vertexCount; i++) {
+            const weight = weights[i];
+
+            if (weight === 0) {
+                continue;
+            }
+
+            const read = i * 3;
+            const write = i * 4;
+            const inverse = 1 / weight;
+
+            colors[write] += (((sums[read] * inverse) - colors[write]) * SMOOTH_COLOR_RELAX);
+            colors[write + 1] += (((sums[read + 1] * inverse) - colors[write + 1]) * SMOOTH_COLOR_RELAX);
+            colors[write + 2] += (((sums[read + 2] * inverse) - colors[write + 2]) * SMOOTH_COLOR_RELAX);
+        }
     }
 
     /**
      * Creates or updates the renderable mesh for a chunk of the provided lane.
      */
-    private _uploadMesh(lane: MeshLane, chunkKey: number, mortonKey: MortonKey, positions: Float32Array, normals: Float32Array, colors: Float32Array, indices: Uint32Array, triangles: number): void {
+    private _uploadMesh(lane: MeshLane, chunkKey: number, mortonKey: MortonKey, positions: Float32Array, normals: Float32Array, colors: Float32Array, occlusion: Float32Array, indices: Uint32Array, triangles: number): void {
         const wire = this._renderMode === "wireframe";
 
         let mesh = lane.meshes.get(chunkKey);
@@ -2677,6 +3039,42 @@ export class VoxelEditor {
         data.indices = indices;
 
         data.applyToMesh(mesh, true);
+
+        // VertexData only understands Babylon's own vertex kinds, so the baked
+        // occlusion stream is attached separately - after applyToMesh, which
+        // rebuilds the geometry whenever the vertex count changes.
+        //
+        // Only the materials that actually read it get it. The water shader
+        // takes its shoreline from the vertex colour and the wireframe material
+        // is unlit, so uploading a whole extra vertex buffer for them is a GPU
+        // allocation per chunk per remesh that nothing ever samples - and water
+        // is the lane a running simulation remeshes hardest.
+        if (!wire && lane !== this._waterLane) {
+            mesh.setVerticesData(BVX_AO_KIND, occlusion, true, 1);
+        }
+        else if (mesh.isVerticesDataPresent(BVX_AO_KIND)) {
+            mesh.removeVerticesData(BVX_AO_KIND);
+        }
+
+        // A chunk never moves once placed, so its world matrix is computed here
+        // rather than every frame for every one of the region's meshes.
+        //
+        // After the geometry, and on every upload, both of which matter. The
+        // frustum test reads the bounding box in world space, and that is
+        // produced by transforming the *local* box - which does not exist until
+        // the vertices are applied, and changes whenever they are replaced.
+        // Freezing before that leaves every chunk's culling bounds sitting at
+        // the origin, and since all of them then share one box, whole regions
+        // of the world blink out at whatever camera angles put that box off
+        // screen. freezeWorldMatrix() unfreezes and recomputes internally, so
+        // calling it repeatedly is safe.
+        mesh.freezeWorldMatrix();
+
+        // the engine runs in non-compatibility mode, where a mesh's draw is
+        // cached as a render bundle that holds its buffers - the geometry this
+        // upload just replaced is exactly what such a bundle would still be
+        // pointing at
+        mesh.resetDrawCache();
 
         lane.triangles.set(chunkKey, triangles);
     }
@@ -2789,7 +3187,9 @@ export class VoxelEditor {
             workers: this._pool.size,
             sandGrains: this._sand.length,
             waterGrains: this._water.length,
-            activeGrains: this._sand.activeCount + this._water.activeCount
+            activeGrains: this._sand.activeCount + this._water.activeCount,
+            fps: this._engine.getFps(),
+            cpuFrameTime: this._cpuFrameTime
         });
     }
 

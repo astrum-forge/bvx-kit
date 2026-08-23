@@ -30,15 +30,22 @@ export const App = () => {
     const fileRef = useRef<HTMLInputElement>(null);
     const editorRef = useRef<VoxelEditor | null>(null);
 
+    // the in-flight (or settled) editor startup, and the pending teardown a
+    // remount cancels - see the lifecycle effect below
+    const startupRef = useRef<Promise<VoxelEditor> | null>(null);
+    const teardownRef = useRef<number | null>(null);
+
     const [tool, setTool] = useState<EditorTool>("paint");
     const [brushSize, setBrushSize] = useState(1);
     const [colorIndex, setColorIndex] = useState(6);
     const [renderMode, setRenderMode] = useState<RenderMode>("blocky");
     const [smoothing, setSmoothing] = useState(1);
+    const [occlusion, setOcclusion] = useState(true);
     const [playing, setPlaying] = useState(true);
-    const [stats, setStats] = useState<EditorStats>({ chunks: 0, bitVoxels: 0, triangles: 0, workers: 0, sandGrains: 0, waterGrains: 0, activeGrains: 0 });
+    const [stats, setStats] = useState<EditorStats>({ chunks: 0, bitVoxels: 0, triangles: 0, workers: 0, sandGrains: 0, waterGrains: 0, activeGrains: 0, fps: 0, cpuFrameTime: 0 });
     const [canUndo, setCanUndo] = useState(false);
     const [canRedo, setCanRedo] = useState(false);
+    const [startupError, setStartupError] = useState<string | null>(null);
 
     // ----- editor lifecycle -----
 
@@ -49,27 +56,73 @@ export const App = () => {
             return;
         }
 
-        const editor = new VoxelEditor(canvas);
+        // The WebGPU device comes up asynchronously, which makes this effect's
+        // lifetime awkward: React mounts effects twice in development, and
+        // starting a second engine before the first has finished leaves two
+        // devices configured on one canvas - they take the canvas from each
+        // other and the surviving one never presents again, so the editor comes
+        // up as a frozen first frame.
+        //
+        // So startup is memoised for the component's lifetime and teardown is
+        // deferred by a task. A development remount runs synchronously right
+        // after the cleanup and cancels the teardown; a real unmount does not.
+        if (teardownRef.current !== null) {
+            clearTimeout(teardownRef.current);
+            teardownRef.current = null;
+        }
 
-        editor.onStats = setStats;
-        editor.onColorPicked = (picked) => {
-            setColorIndex(picked);
-            setTool("paint");
-            editor.setTool("paint");
-        };
-        editor.onHistoryChanged = (undo, redo) => {
-            setCanUndo(undo);
-            setCanRedo(redo);
-        };
+        startupRef.current ??= VoxelEditor.create(canvas);
 
-        editorRef.current = editor;
+        let cancelled = false;
 
-        // start with something to look at
-        editor.demoScene();
+        void startupRef.current
+            .then((editor) => {
+                if (cancelled) {
+                    return;
+                }
+
+                editor.onStats = setStats;
+                editor.onColorPicked = (picked) => {
+                    setColorIndex(picked);
+                    setTool("paint");
+                    editor.setTool("paint");
+                };
+                editor.onHistoryChanged = (undo, redo) => {
+                    setCanUndo(undo);
+                    setCanRedo(redo);
+                };
+
+                editorRef.current = editor;
+                setOcclusion(editor.occlusionEnabled);
+
+                // a handle for poking at the scene from the browser console
+                // while tuning the look
+                Reflect.set(window, "bvxEditor", editor);
+
+                // start with something to look at, but only the first time -
+                // a remount reattaches to the editor that is already running
+                if (editor.isEmpty) {
+                    editor.demoScene();
+                }
+            })
+            .catch((error: unknown) => {
+                if (!cancelled) {
+                    setStartupError(error instanceof Error ? error.message : String(error));
+                }
+            });
 
         return () => {
+            cancelled = true;
             editorRef.current = null;
-            editor.dispose();
+
+            const startup = startupRef.current;
+
+            teardownRef.current = window.setTimeout(() => {
+                teardownRef.current = null;
+                startupRef.current = null;
+
+                void startup?.then((editor) => editor.dispose()).catch(() => undefined);
+            }, 0);
         };
     }, []);
 
@@ -98,6 +151,14 @@ export const App = () => {
     const selectSmoothing = useCallback((value: number) => {
         setSmoothing(value);
         editorRef.current?.setSmoothing(value);
+    }, []);
+
+    const toggleOcclusion = useCallback(() => {
+        setOcclusion((current) => {
+            editorRef.current?.setOcclusionEnabled(!current);
+
+            return !current;
+        });
     }, []);
 
     const togglePlaying = useCallback(() => {
@@ -301,6 +362,22 @@ export const App = () => {
 
                 <main className="viewport">
                     <canvas ref={canvasRef} />
+
+                    {startupError && (
+                        <div className="viewport-error">
+                            <h2>WebGPU required</h2>
+                            <p>
+                                The BitVoxel Editor renders through WebGPU. This browser could not
+                                provide a device.
+                            </p>
+                            <p className="viewport-error-detail">{startupError}</p>
+                            <p>
+                                Chrome 113+, Edge 113+, Safari 26+ and Firefox 141+ support WebGPU;
+                                on Linux it may need to be enabled explicitly.
+                            </p>
+                        </div>
+                    )}
+
                     <div className="viewport-hint">
                         Draw: left-drag &nbsp;·&nbsp; Orbit: right-drag / ⌥-drag / 2-finger scroll &nbsp;·&nbsp; Pan: middle-drag / ⌥⇧-drag &nbsp;·&nbsp; Zoom: wheel / pinch &nbsp;·&nbsp; Frame: F
                     </div>
@@ -337,6 +414,13 @@ export const App = () => {
                                 onChange={(event) => selectSmoothing(parseInt(event.target.value, 10))}
                             />
                         </div>
+
+                        <label className="toggle">
+                            <input type="checkbox" checked={occlusion} onChange={toggleOcclusion} />
+                            <span>Screen-space occlusion</span>
+                        </label>
+
+                        <p className="note">Contact shading the baked occlusion cannot see.</p>
                     </section>
 
                     <section className="panel">
@@ -383,6 +467,8 @@ export const App = () => {
                         <h3>Statistics</h3>
 
                         <dl className="stats">
+                            <div><dt>Frame rate</dt><dd>{Math.round(stats.fps)} fps</dd></div>
+                            <div><dt>CPU frame</dt><dd>{stats.cpuFrameTime.toFixed(1)} ms</dd></div>
                             <div><dt>Chunks</dt><dd>{stats.chunks.toLocaleString()}</dd></div>
                             <div><dt>BitVoxels</dt><dd>{stats.bitVoxels.toLocaleString()}</dd></div>
                             <div><dt>Triangles</dt><dd>{stats.triangles.toLocaleString()}</dd></div>
