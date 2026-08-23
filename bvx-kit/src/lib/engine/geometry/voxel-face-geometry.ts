@@ -1,4 +1,6 @@
 import { MortonKey } from "../../math/morton-key.js";
+import { BitOps } from "../../util/bit-ops.js";
+import { BitArray } from "../../containers/bit-array.js";
 import { VoxelChunk0 } from "../chunks/voxel-chunk-0.js";
 import { VoxelChunk } from "../chunks/voxel-chunk.js";
 import { BVXLayer } from "../layer/bvx-layer.js";
@@ -39,6 +41,19 @@ export class VoxelFaceGeometry extends VoxelGeometry {
     private static readonly _NEIGHBOUR_TABLES: Int16Array[] = VoxelFaceGeometry._BuildNeighbourTables();
 
     /**
+     * Number of set bits for every one of the 64 possible 6-bit face masks. Reading
+     * the count from here keeps the geometry loop free of a popcount call.
+     */
+    private static readonly _MASK_FACE_COUNTS: Uint8Array = VoxelFaceGeometry._BuildMaskFaceCounts();
+
+    /**
+     * Ascending indices of every BitVoxel touching a chunk face - the 1352 of 4096 that
+     * have at least one neighbour outside the chunk. Used by the solid-center path,
+     * where no interior BitVoxel can possibly be visible.
+     */
+    private static readonly _BOUNDARY_INDICES: Uint16Array = VoxelFaceGeometry._BuildBoundaryIndices();
+
+    /**
      * Temporary MortonKey used to represent voxel chunk positions for neighboring chunk queries.
      */
     private static readonly TMP_MK: MortonKey = new MortonKey();
@@ -62,6 +77,47 @@ export class VoxelFaceGeometry extends VoxelGeometry {
         new Uint32Array(BVXLayer.SIZE / 32),
         new Uint32Array(BVXLayer.SIZE / 32)
     ];
+
+    /**
+     * Builds the face-count table for the 64 possible 6-bit face masks. This runs once
+     * at class initialization time.
+     *
+     * @returns - A 64-entry table of set-bit counts indexed by face mask.
+     */
+    private static _BuildMaskFaceCounts(): Uint8Array {
+        const counts: Uint8Array = new Uint8Array(64);
+
+        for (let mask = 0; mask < 64; mask++) {
+            counts[mask] = BitOps.popCount(mask);
+        }
+
+        return counts;
+    }
+
+    /**
+     * Builds the ascending list of BitVoxel indices that touch a chunk face. This runs
+     * once at class initialization time.
+     *
+     * @returns - The 1352 boundary BitVoxel indices, in ascending order.
+     */
+    private static _BuildBoundaryIndices(): Uint16Array {
+        const size: number = BVXLayer.SIZE;
+        const last: number = BVXLayer.DIMS - 1;
+        const indices: number[] = [];
+
+        for (let index = 0; index < size; index++) {
+            // decode the BitVoxel index into absolute chunk-space coordinates
+            const x: number = (((index >> 10) & 3) << 2) | ((index >> 4) & 3);
+            const y: number = (((index >> 8) & 3) << 2) | ((index >> 2) & 3);
+            const z: number = (((index >> 6) & 3) << 2) | (index & 3);
+
+            if (x === 0 || x === last || y === 0 || y === last || z === 0 || z === last) {
+                indices.push(index);
+            }
+        }
+
+        return Uint16Array.from(indices);
+    }
 
     /**
      * Builds the 6 static neighbour lookup tables used by computeIndices(). This runs
@@ -237,6 +293,23 @@ export class VoxelFaceGeometry extends VoxelGeometry {
         const zpElements: Uint32Array = VoxelFaceGeometry._MergedElements(zp, ozp, scratch[5]);
         const znElements: Uint32Array = VoxelFaceGeometry._MergedElements(zn, ozn, scratch[6]);
 
+        // Uniform-chunk fast paths. Most chunks in a world with real depth are entirely
+        // air or entirely solid ground, and both produce no geometry at all - but the
+        // solid case is the single most expensive chunk to discover that about, because
+        // every one of its 4096 BitVoxels is set and samples six neighbours only to find
+        // itself enclosed.
+        //
+        // Both tests run against the merged storages, so they stay correct when an
+        // occluder world is contributing occupancy.
+        const centerState: number = BitArray.uniformState(centerOwnElements);
+
+        // nothing is set, so nothing can emit a face
+        if (centerState === BitArray.EMPTY) {
+            this.commit(0, 0);
+
+            return;
+        }
+
         // Precomputed neighbour lookup tables for each face direction.
         const tables: Int16Array[] = VoxelFaceGeometry._NEIGHBOUR_TABLES;
         const tableXP: Int16Array = tables[0];
@@ -246,8 +319,80 @@ export class VoxelFaceGeometry extends VoxelGeometry {
         const tableZP: Int16Array = tables[4];
         const tableZN: Int16Array = tables[5];
 
-        // The array that holds the computed geometry indices for the chunk.
+        // Geometry output. Populated entries are appended to the touched list in
+        // ascending order and the totals are published once at the end of the pass -
+        // see VoxelGeometry.touchedBuffer for why this is open-coded.
         const indices: Uint8Array = this.indices;
+        const touched: Uint16Array = this.touchedBuffer;
+        const faceCounts: Uint8Array = VoxelFaceGeometry._MASK_FACE_COUNTS;
+
+        let touchedCount = 0;
+        let faceCount = 0;
+
+        // Solid-center fast path. With every BitVoxel set, every in-chunk neighbour is
+        // set too, so no interior BitVoxel can be visible and the only faces that can
+        // survive are those pointing out of the chunk. Walking the 1352 boundary
+        // BitVoxels and sampling only their cross-chunk neighbours replaces 4096 x 6
+        // samples with roughly 1352 x 1.3 of them.
+        //
+        // This is the shell of ground directly beneath a surface. Chunks buried deeper
+        // exit on the first neighbour test below and never reach the loop at all.
+        if (centerState === BitArray.FULL) {
+            // A solid neighbour hides the whole face pointing at it. Resolving that
+            // once per direction lets the buried case - solid ground surrounded by
+            // solid ground - return without touching a single BitVoxel, and lets the
+            // shell case skip the memory reads for whichever directions are covered.
+            const xpFull: boolean = BitArray.uniformState(xpElements) === BitArray.FULL;
+            const xnFull: boolean = BitArray.uniformState(xnElements) === BitArray.FULL;
+            const ypFull: boolean = BitArray.uniformState(ypElements) === BitArray.FULL;
+            const ynFull: boolean = BitArray.uniformState(ynElements) === BitArray.FULL;
+            const zpFull: boolean = BitArray.uniformState(zpElements) === BitArray.FULL;
+            const znFull: boolean = BitArray.uniformState(znElements) === BitArray.FULL;
+
+            if (xpFull && xnFull && ypFull && ynFull && zpFull && znFull) {
+                this.commit(0, 0);
+
+                return;
+            }
+
+            const boundary: Uint16Array = VoxelFaceGeometry._BOUNDARY_INDICES;
+            const length: number = boundary.length;
+
+            for (let b = 0; b < length; b++) {
+                const index: number = boundary[b];
+
+                // a negative table entry means the neighbour lives in the adjacent
+                // chunk - every non-negative entry is an in-chunk neighbour, which a
+                // solid center guarantees is set and therefore hides the face
+                const nxp: number = tableXP[index];
+                const nxn: number = tableXN[index];
+                const nyp: number = tableYP[index];
+                const nyn: number = tableYN[index];
+                const nzp: number = tableZP[index];
+                const nzn: number = tableZN[index];
+
+                const mask: number =
+                    (nxp < 0 && !xpFull ? ((xpElements[(~nxp) >> 5] >>> (~nxp & 31)) & 1) ^ 1 : 0) << VoxelFaceGeometry.X_POS_INDEX |
+                    (nxn < 0 && !xnFull ? ((xnElements[(~nxn) >> 5] >>> (~nxn & 31)) & 1) ^ 1 : 0) << VoxelFaceGeometry.X_NEG_INDEX |
+                    (nyp < 0 && !ypFull ? ((ypElements[(~nyp) >> 5] >>> (~nyp & 31)) & 1) ^ 1 : 0) << VoxelFaceGeometry.Y_POS_INDEX |
+                    (nyn < 0 && !ynFull ? ((ynElements[(~nyn) >> 5] >>> (~nyn & 31)) & 1) ^ 1 : 0) << VoxelFaceGeometry.Y_NEG_INDEX |
+                    (nzp < 0 && !zpFull ? ((zpElements[(~nzp) >> 5] >>> (~nzp & 31)) & 1) ^ 1 : 0) << VoxelFaceGeometry.Z_POS_INDEX |
+                    (nzn < 0 && !znFull ? ((znElements[(~nzn) >> 5] >>> (~nzn & 31)) & 1) ^ 1 : 0) << VoxelFaceGeometry.Z_NEG_INDEX;
+
+                if (mask === 0) {
+                    continue;
+                }
+
+                indices[index] = mask;
+                touched[touchedCount] = index;
+                touchedCount++;
+                faceCount += faceCounts[mask];
+            }
+
+            this.commit(touchedCount, faceCount);
+
+            return;
+        }
 
         // Iterate the own BitVoxel storage word-by-word, skipping empty 32 BitVoxel
         // blocks entirely. This is considerably faster than testing all 4096
@@ -281,14 +426,30 @@ export class VoxelFaceGeometry extends VoxelGeometry {
                 const bvzn: number = VoxelFaceGeometry._SampleState(tableZN, index, centerElements, znElements); // -z face
 
                 // A face is rendered only when the neighbouring BitVoxel is OFF.
-                indices[index] =
+                const mask: number =
                     ((bvxp ^ 1) << VoxelFaceGeometry.X_POS_INDEX) |
                     ((bvxn ^ 1) << VoxelFaceGeometry.X_NEG_INDEX) |
                     ((bvyp ^ 1) << VoxelFaceGeometry.Y_POS_INDEX) |
                     ((bvyn ^ 1) << VoxelFaceGeometry.Y_NEG_INDEX) |
                     ((bvzp ^ 1) << VoxelFaceGeometry.Z_POS_INDEX) |
                     ((bvzn ^ 1) << VoxelFaceGeometry.Z_NEG_INDEX);
+
+                // A fully enclosed BitVoxel emits nothing - the index buffer is
+                // already 0 here, so there is no write to make. This is the common
+                // case inside solid ground, where it replaces a store with a branch.
+                if (mask === 0) {
+                    continue;
+                }
+
+                // Bits are scanned lowest-first within ascending words, so indices
+                // are appended in the ascending order the touched list requires.
+                indices[index] = mask;
+                touched[touchedCount] = index;
+                touchedCount++;
+                faceCount += faceCounts[mask];
             }
         }
+
+        this.commit(touchedCount, faceCount);
     }
 }

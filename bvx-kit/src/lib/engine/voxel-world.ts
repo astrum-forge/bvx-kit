@@ -33,9 +33,10 @@ export class VoxelWorld {
     private readonly _voxelRaycaster: VoxelRaycaster;
 
     constructor() {
-        // Initialize the HashGrid with 1024 buckets. This can be increased to improve
-        // lookup performance at the cost of more memory usage.
-        this._voxelChunks = new HashGrid<MortonKey, VoxelChunk>(1024);
+        // The default bucket count suits a large resident world. A world that only ever
+        // holds a handful of chunks, such as the neighbourhood a mesh request carries,
+        // can pass a smaller count to avoid allocating the bucket array.
+        this._voxelChunks = new HashGrid<MortonKey, VoxelChunk>();
 
         // Initialize the VoxelRaycaster for querying voxel data within this world.
         this._voxelRaycaster = new VoxelRaycaster(this);

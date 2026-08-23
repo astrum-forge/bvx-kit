@@ -476,4 +476,343 @@ describe('VoxelFaceGeometry', () => {
             }
         }
     });
+    it('.touched - lists every populated BitVoxel index in ascending order', () => {
+        const world = new VoxelWorld();
+        const chunk = new VoxelChunk0(MortonKey.from(1, 1, 1));
+
+        world.insert(chunk);
+
+        // three isolated BitVoxels, each fully exposed on all 6 faces
+        const a = VoxelIndex.from(0, 0, 0, 1, 1, 1);
+        const b = VoxelIndex.from(2, 2, 2, 0, 0, 0);
+        const c = VoxelIndex.from(3, 3, 3, 3, 3, 3);
+
+        chunk.setBitVoxel(a);
+        chunk.setBitVoxel(b);
+        chunk.setBitVoxel(c);
+
+        const geometry = new VoxelFaceGeometry();
+        geometry.computeIndices(chunk, world);
+
+        expect(geometry.touchedCount).toEqual(3);
+        expect(Array.from(geometry.touched)).toEqual([a.key, b.key, c.key].sort((x, y) => x - y));
+        expect(geometry.popCount()).toEqual(18);
+
+        // the touched list must agree with the index buffer in both directions
+        let nonZero = 0;
+
+        for (let i = 0; i < geometry.length; i++) {
+            if (geometry.indices[i] !== 0) {
+                nonZero++;
+
+                expect(Array.from(geometry.touched)).toContain(i);
+            }
+        }
+
+        expect(nonZero).toEqual(geometry.touchedCount);
+    });
+
+    it('.reset() - clears every populated entry from the previous computation', () => {
+        const world = new VoxelWorld();
+        const chunk = new VoxelChunk0(MortonKey.from(1, 1, 1));
+
+        world.insert(chunk);
+
+        // populate a spread of BitVoxels, then recompute against a single one -
+        // reset() only walks the previous touched list, so a stale mask left behind
+        // by the first pass would survive into the second
+        for (let vx = 0; vx < 4; vx++) {
+            for (let vy = 0; vy < 4; vy++) {
+                for (let vz = 0; vz < 4; vz++) {
+                    chunk.setBitVoxel(VoxelIndex.from(vx, vy, vz, 1, 1, 1));
+                }
+            }
+        }
+
+        const geometry = new VoxelFaceGeometry();
+        geometry.computeIndices(chunk, world);
+
+        expect(geometry.touchedCount).toEqual(64);
+        expect(geometry.popCount()).toEqual(64 * 6);
+
+        // clear all but one BitVoxel and recompute
+        for (let vx = 0; vx < 4; vx++) {
+            for (let vy = 0; vy < 4; vy++) {
+                for (let vz = 0; vz < 4; vz++) {
+                    if (vx === 0 && vy === 0 && vz === 0) {
+                        continue;
+                    }
+
+                    chunk.unsetBitVoxel(VoxelIndex.from(vx, vy, vz, 1, 1, 1));
+                }
+            }
+        }
+
+        geometry.computeIndices(chunk, world);
+
+        expect(geometry.touchedCount).toEqual(1);
+        expect(geometry.popCount()).toEqual(6);
+
+        // no stale masks anywhere in the buffer
+        let nonZero = 0;
+
+        for (let i = 0; i < geometry.length; i++) {
+            if (geometry.indices[i] !== 0) {
+                nonZero++;
+            }
+        }
+
+        expect(nonZero).toEqual(1);
+    });
+
+    it('.reset() - explicit call clears the buffer, count and touched list', () => {
+        const world = new VoxelWorld();
+        const chunk = new VoxelChunk0(MortonKey.from(1, 1, 1));
+
+        world.insert(chunk);
+        chunk.setBitVoxel(VoxelIndex.from(1, 1, 1, 1, 1, 1));
+
+        const geometry = new VoxelFaceGeometry();
+        geometry.computeIndices(chunk, world);
+
+        expect(geometry.popCount()).toEqual(6);
+        expect(geometry.touchedCount).toEqual(1);
+
+        geometry.reset();
+
+        expect(geometry.popCount()).toEqual(0);
+        expect(geometry.touchedCount).toEqual(0);
+        expect(geometry.touched.length).toEqual(0);
+
+        for (let i = 0; i < geometry.length; i++) {
+            expect(geometry.indices[i]).toEqual(0);
+        }
+    });
+
+    /**
+     * Fills every BitVoxel of a chunk. Writes the storage directly, which is also what
+     * exercises uniformState()'s on-demand scan rather than any write-tracked flag.
+     */
+    const fillChunk = (chunk: VoxelChunk0): void => {
+        const elements = chunk.layer.bitArray.elements;
+
+        for (let i = 0; i < elements.length; i++) {
+            elements[i] = 0xFFFFFFFF;
+        }
+    };
+
+    /**
+     * Reads the BitVoxel at a global BitVoxel coordinate, treating chunks that are
+     * absent from the world as empty. The reference the fast paths must agree with.
+     */
+    const worldBit = (world: VoxelWorld, x: number, y: number, z: number): number => {
+        const chunk = world.get(MortonKey.from(x >> 4, y >> 4, z >> 4));
+
+        if (chunk === null) {
+            return 0;
+        }
+
+        const lx = x & 15;
+        const ly = y & 15;
+        const lz = z & 15;
+
+        return chunk.getBitVoxel(VoxelIndex.from(lx >> 2, ly >> 2, lz >> 2, lx & 3, ly & 3, lz & 3));
+    };
+
+    /**
+     * Checks a computed geometry against a direct per-BitVoxel evaluation of the same
+     * world, and checks that the touched list and face count agree with the buffer.
+     */
+    const expectMatchesReference = (geometry: VoxelFaceGeometry, world: VoxelWorld, cx: number, cy: number, cz: number): void => {
+        const queryIndex = new VoxelIndex();
+
+        let expectedFaces = 0;
+        let expectedTouched = 0;
+
+        for (let i = 0; i < geometry.length; i++) {
+            queryIndex.key = i;
+
+            const x = (cx * 16) + (queryIndex.vx * 4) + queryIndex.bx;
+            const y = (cy * 16) + (queryIndex.vy * 4) + queryIndex.by;
+            const z = (cz * 16) + (queryIndex.vz * 4) + queryIndex.bz;
+
+            // only a set BitVoxel emits, and only where its neighbour is empty
+            const expected = worldBit(world, x, y, z) === 0 ? 0 :
+                ((worldBit(world, x + 1, y, z) ^ 1) << VoxelFaceGeometry.X_POS_INDEX) |
+                ((worldBit(world, x - 1, y, z) ^ 1) << VoxelFaceGeometry.X_NEG_INDEX) |
+                ((worldBit(world, x, y + 1, z) ^ 1) << VoxelFaceGeometry.Y_POS_INDEX) |
+                ((worldBit(world, x, y - 1, z) ^ 1) << VoxelFaceGeometry.Y_NEG_INDEX) |
+                ((worldBit(world, x, y, z + 1) ^ 1) << VoxelFaceGeometry.Z_POS_INDEX) |
+                ((worldBit(world, x, y, z - 1) ^ 1) << VoxelFaceGeometry.Z_NEG_INDEX);
+
+            expect(geometry.indices[i]).toEqual(expected);
+
+            if (expected !== 0) {
+                expectedTouched++;
+                expectedFaces += BitOps.popCount(expected);
+            }
+        }
+
+        expect(geometry.touchedCount).toEqual(expectedTouched);
+        expect(geometry.popCount()).toEqual(expectedFaces);
+
+        // the touched list must be ascending and cover exactly the populated entries
+        const touched = geometry.touched;
+
+        for (let t = 1; t < touched.length; t++) {
+            expect(touched[t]).toBeGreaterThan(touched[t - 1]);
+        }
+
+        for (let t = 0; t < touched.length; t++) {
+            expect(geometry.indices[touched[t]]).not.toEqual(0);
+        }
+    };
+
+    it('.computeIndices() - a solid chunk buried in solid neighbours emits nothing', () => {
+        const world = new VoxelWorld();
+
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dz = -1; dz <= 1; dz++) {
+                    const chunk = new VoxelChunk0(MortonKey.from(4 + dx, 4 + dy, 4 + dz));
+
+                    fillChunk(chunk);
+                    world.insert(chunk);
+                }
+            }
+        }
+
+        const center = world.get(MortonKey.from(4, 4, 4)) as VoxelChunk0;
+
+        expect(center.isFull).toEqual(true);
+        expect(center.isEmpty).toEqual(false);
+
+        const geometry = new VoxelFaceGeometry();
+        geometry.computeIndices(center, world);
+
+        expect(geometry.popCount()).toEqual(0);
+        expect(geometry.touchedCount).toEqual(0);
+
+        expectMatchesReference(geometry, world, 4, 4, 4);
+    });
+
+    it('.computeIndices() - a solid chunk with no neighbours emits all six faces', () => {
+        const world = new VoxelWorld();
+        const center = new VoxelChunk0(MortonKey.from(4, 4, 4));
+
+        fillChunk(center);
+        world.insert(center);
+
+        const geometry = new VoxelFaceGeometry();
+        geometry.computeIndices(center, world);
+
+        // six faces of 16x16 BitVoxels
+        expect(geometry.popCount()).toEqual(6 * 16 * 16);
+
+        expectMatchesReference(geometry, world, 4, 4, 4);
+    });
+
+    it('.computeIndices() - a solid chunk against a mixed neighbour matches the reference', () => {
+        const world = new VoxelWorld();
+        const center = new VoxelChunk0(MortonKey.from(4, 4, 4));
+
+        fillChunk(center);
+        world.insert(center);
+
+        // surround with solid chunks on every side but +y
+        const solidSides = [[1, 0, 0], [-1, 0, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+
+        for (const [dx, dy, dz] of solidSides) {
+            const side = new VoxelChunk0(MortonKey.from(4 + dx, 4 + dy, 4 + dz));
+
+            fillChunk(side);
+            world.insert(side);
+        }
+
+        // the +y neighbour is a partial slab, so only some of the top face is visible
+        const above = new VoxelChunk0(MortonKey.from(4, 5, 4));
+
+        for (let x = 0; x < 8; x++) {
+            for (let z = 0; z < 16; z++) {
+                above.setBitVoxel(VoxelIndex.from(x >> 2, 0, z >> 2, x & 3, 0, z & 3));
+            }
+        }
+
+        world.insert(above);
+
+        expect(above.isFull).toEqual(false);
+        expect(above.isEmpty).toEqual(false);
+
+        const geometry = new VoxelFaceGeometry();
+        geometry.computeIndices(center, world);
+
+        // half of the 16x16 top face is exposed
+        expect(geometry.popCount()).toEqual(8 * 16);
+
+        expectMatchesReference(geometry, world, 4, 4, 4);
+    });
+
+    it('.computeIndices() - an occluder covering a solid chunk suppresses its faces', () => {
+        const world = new VoxelWorld();
+        const center = new VoxelChunk0(MortonKey.from(4, 4, 4));
+
+        fillChunk(center);
+        world.insert(center);
+
+        // nothing in the own world, so every face would be visible
+        const bare = new VoxelFaceGeometry();
+        bare.computeIndices(center, world);
+
+        expect(bare.popCount()).toEqual(6 * 16 * 16);
+
+        // an occluder world that is solid all around the center hides all of them
+        const occluders = new VoxelWorld();
+
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dz = -1; dz <= 1; dz++) {
+                    const chunk = new VoxelChunk0(MortonKey.from(4 + dx, 4 + dy, 4 + dz));
+
+                    fillChunk(chunk);
+                    occluders.insert(chunk);
+                }
+            }
+        }
+
+        const geometry = new VoxelFaceGeometry();
+        geometry.computeIndices(center, world, occluders);
+
+        expect(geometry.popCount()).toEqual(0);
+        expect(geometry.touchedCount).toEqual(0);
+    });
+
+    it('.computeIndices() - an empty chunk emits nothing regardless of neighbours', () => {
+        const world = new VoxelWorld();
+        const center = new VoxelChunk0(MortonKey.from(4, 4, 4));
+
+        world.insert(center);
+
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dz = -1; dz <= 1; dz++) {
+                    if (dx === 0 && dy === 0 && dz === 0) {
+                        continue;
+                    }
+
+                    const chunk = new VoxelChunk0(MortonKey.from(4 + dx, 4 + dy, 4 + dz));
+
+                    fillChunk(chunk);
+                    world.insert(chunk);
+                }
+            }
+        }
+
+        expect(center.isEmpty).toEqual(true);
+
+        const geometry = new VoxelFaceGeometry();
+        geometry.computeIndices(center, world);
+
+        expect(geometry.popCount()).toEqual(0);
+        expect(geometry.touchedCount).toEqual(0);
+    });
 });

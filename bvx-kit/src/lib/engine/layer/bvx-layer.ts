@@ -20,14 +20,32 @@ export class BVXLayer {
     public static readonly SIZE: number = BVXLayer.DIMS * BVXLayer.DIMS * BVXLayer.DIMS;
 
     /**
+     * Number of 32-bit elements the occupancy storage occupies (4096 bits).
+     */
+    public static readonly ELEMENTS: number = BVXLayer.SIZE / 32;
+
+    /**
+     * Number of bytes the occupancy storage occupies.
+     */
+    public static readonly BYTE_LENGTH: number = BVXLayer.ELEMENTS * 4;
+
+    /**
      * Primary storage for BitVoxels, implemented as a BitArray.
      * This array holds the on/off state of each BitVoxel.
      */
     private readonly _bitVoxels: BitArray;
 
-    constructor() {
-        // Allocates storage for 4096 BitVoxels (stored in 128 32-bit integers).
-        this._bitVoxels = new BitArray(BVXLayer.SIZE / 32);
+    /**
+     * Constructs a new BVXLayer.
+     *
+     * @param buffer - (Optional) Externally-owned storage to view. When null, storage
+     * is allocated. See ChunkStorage.
+     * @param byteOffset - (Optional) Byte offset into the provided buffer. Must be a
+     * multiple of 4.
+     */
+    constructor(buffer: ArrayBufferLike | null = null, byteOffset = 0) {
+        // Allocates or views storage for 4096 BitVoxels (stored in 128 32-bit integers).
+        this._bitVoxels = new BitArray(BVXLayer.ELEMENTS, buffer, byteOffset);
     }
 
     /**
@@ -36,6 +54,33 @@ export class BVXLayer {
      */
     public get length(): number {
         return this._bitVoxels.popCount();
+    }
+
+    /**
+     * Returns true when no BitVoxel in this layer is set.
+     *
+     * A uniform layer needs no geometry and no neighbour sampling, which is what makes
+     * this worth asking - in a world with real depth most chunks are entirely solid
+     * ground or entirely air. See BitArray.uniformState for the cost.
+     */
+    public get isEmpty(): boolean {
+        return this._bitVoxels.uniformState === BitArray.EMPTY;
+    }
+
+    /**
+     * Returns true when every BitVoxel in this layer is set.
+     */
+    public get isFull(): boolean {
+        return this._bitVoxels.uniformState === BitArray.FULL;
+    }
+
+    /**
+     * Returns whether this layer is entirely empty, entirely full, or a mix of the two.
+     *
+     * @returns - BitArray.EMPTY, BitArray.FULL or BitArray.MIXED.
+     */
+    public get uniformState(): number {
+        return this._bitVoxels.uniformState;
     }
 
     /**
