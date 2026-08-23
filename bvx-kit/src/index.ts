@@ -18,6 +18,8 @@ export { VoxelChunk0 } from "./lib/engine/chunks/voxel-chunk-0.js";
 export { VoxelChunk8 } from "./lib/engine/chunks/voxel-chunk-8.js";
 export { VoxelChunk16 } from "./lib/engine/chunks/voxel-chunk-16.js";
 export { VoxelChunk32 } from "./lib/engine/chunks/voxel-chunk-32.js";
+export { VoxelChunkArena } from "./lib/engine/chunks/voxel-chunk-arena.js";
+export type { ChunkStorage } from "./lib/engine/chunks/chunk-storage.js";
 export { VoxelIndex } from "./lib/engine/voxel-index.js";
 export { WorldIndex } from "./lib/engine/world-index.js";
 export { VoxelGeometry } from "./lib/engine/geometry/voxel-geometry.js";
@@ -42,6 +44,10 @@ export { BVXMesher } from "./lib/worker/bvx-mesher.js";
 export type { MesherRequest, MesherFacesRequest, MesherSmoothRequest, MesherResponse, MesherFacesResponse, MesherSmoothResponse } from "./lib/worker/bvx-mesher.js";
 export { BVXWorkerHost } from "./lib/worker/bvx-worker-host.js";
 export type { MesherScope } from "./lib/worker/bvx-worker-host.js";
+export { BVXPhysicsRunner } from "./lib/worker/bvx-physics-runner.js";
+export type { PhysicsRequest, PhysicsAttachRequest, PhysicsEditRequest, PhysicsInjectRequest, PhysicsStepRequest, PhysicsResponse, PhysicsStepResponse, PhysicsAckResponse, PhysicsLayerDelta } from "./lib/worker/bvx-physics-runner.js";
+export { BVXPhysicsHost } from "./lib/worker/bvx-physics-host.js";
+export type { PhysicsScope } from "./lib/worker/bvx-physics-host.js";
 
 // export generators
 export { BVXGeometry } from "./lib/geometry/bvx-geometry.js";

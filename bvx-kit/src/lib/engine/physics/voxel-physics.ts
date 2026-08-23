@@ -105,6 +105,12 @@ export class VoxelPhysics {
     private _tick = 0;
 
     /**
+     * Whether the most recent update() stopped on its move budget rather than
+     * running out of work.
+     */
+    private _budgetExceeded = false;
+
+    /**
      * The largest flowDistance across all registered flow layers, or 0 when no
      * layer flows. Determines how far lateral vacancy wakes must propagate.
      */
@@ -184,6 +190,17 @@ export class VoxelPhysics {
     }
 
     /**
+     * Returns whether the most recent update() stopped on its move budget with work
+     * still outstanding, rather than because everything that could move had moved.
+     *
+     * A caller running its own fixed-step accumulator can use this to decide whether
+     * to keep ticking - the simulation is behind, not settled.
+     */
+    public get budgetExceeded(): boolean {
+        return this._budgetExceeded;
+    }
+
+    /**
      * Returns the largest flowDistance across all registered flow layers, or 0
      * when no layer flows. Used internally to bound lateral vacancy wakes.
      */
@@ -237,13 +254,35 @@ export class VoxelPhysics {
      * one cell. Call this from the application's update loop - once per frame
      * or on a fixed timestep. With no active grains the call is effectively free.
      *
+     * A collapsing pile wakes a large region at once, so tick cost is spiky - peaks
+     * run around ten times the mean. Passing a move budget caps the work a single
+     * call performs: the sweep stops once the budget is spent, and the chunks it did
+     * not reach stay awake and are swept by the following call. The collapse then
+     * resolves over several ticks instead of one long one, which trades a little
+     * settling latency for a bounded cost per call.
+     *
+     * The budget is denominated in grain movements rather than milliseconds so that
+     * a given input produces the same simulation on every machine. Cost is close to
+     * linear in movements, so a target frame budget converts directly - measure the
+     * local movements-per-second once and multiply.
+     *
+     * When a budget cuts a tick short, the layers that had not yet stepped are skipped
+     * for that tick, so cross-layer displacement resolves a tick later than it
+     * otherwise would. Check budgetExceeded to detect this.
+     *
      * @param steps - (Optional) The number of simulation ticks to advance. Defaults to 1.
+     * @param maxMoves - (Optional) Stop once this many grains have moved across the
+     * whole call. 0 or less means no limit, which is the default and the previous
+     * behaviour.
      * @returns - The total number of grain movements performed.
      */
-    public update(steps = 1): number {
+    public update(steps = 1, maxMoves = 0): number {
         const stepOrder: VoxelPhysicsLayer[] = this._stepOrder;
+        const budgeted: boolean = maxMoves > 0;
 
         let moves = 0;
+
+        this._budgetExceeded = false;
 
         for (let i = 0; i < steps; i++) {
             const tick: number = this._tick;
@@ -263,10 +302,22 @@ export class VoxelPhysics {
             }
 
             for (let l = 0; l < stepOrder.length; l++) {
-                moves += stepOrder[l].step(tick);
+                // hand each layer what is left of the budget, so the cap applies
+                // across the whole call rather than per layer
+                moves += stepOrder[l].step(tick, budgeted ? maxMoves - moves : 0);
+
+                if (budgeted && moves >= maxMoves) {
+                    this._budgetExceeded = true;
+
+                    break;
+                }
             }
 
             this._tick++;
+
+            if (this._budgetExceeded) {
+                break;
+            }
         }
 
         return moves;

@@ -440,4 +440,103 @@ describe('VoxelPhysics', () => {
         expect(sand.world.get(MortonKey.from(0, 1, 0))).toBeNull();
         expect(sand.world.get(MortonKey.from(0, 0, 0))).not.toBeNull();
     });
+    it('.update() - a move budget bounds the work and defers the rest', () => {
+        const physics = makePhysics();
+        const sand = physics.addLayer(VoxelPhysics.SAND);
+
+        // a wide field of grains high in the air - every one of them wants to fall,
+        // and they span enough chunks that a budget can cut the sweep part way
+        for (let x = 0; x < 32; x++) {
+            for (let z = 0; z < 32; z++) {
+                for (let y = 40; y < 48; y++) {
+                    sand.set(x, y, z);
+                }
+            }
+        }
+
+        const total = sand.length;
+
+        expect(total).toEqual(32 * 32 * 8);
+
+        // an unbudgeted tick moves far more than the budget we are about to impose
+        const reference = makePhysics();
+        const referenceSand = reference.addLayer(VoxelPhysics.SAND);
+
+        for (let x = 0; x < 32; x++) {
+            for (let z = 0; z < 32; z++) {
+                for (let y = 40; y < 48; y++) {
+                    referenceSand.set(x, y, z);
+                }
+            }
+        }
+
+        const unbudgeted = reference.update();
+
+        expect(reference.budgetExceeded).toEqual(false);
+        expect(unbudgeted).toBeGreaterThan(1000);
+
+        const budgeted = physics.update(1, 100);
+
+        expect(physics.budgetExceeded).toEqual(true);
+        expect(budgeted).toBeLessThan(unbudgeted);
+
+        // no grain is lost or duplicated by stopping mid-sweep
+        expect(sand.length).toEqual(total);
+    });
+
+    it('.update() - a budgeted simulation still settles, just over more ticks', () => {
+        const physics = makePhysics();
+        const sand = physics.addLayer(VoxelPhysics.SAND);
+
+        for (let x = 0; x < 8; x++) {
+            for (let z = 0; z < 8; z++) {
+                for (let y = 20; y < 24; y++) {
+                    sand.set(x, y, z);
+                }
+            }
+        }
+
+        const total = sand.length;
+
+        // tick with a tight budget until nothing is left to do
+        let ticks = 0;
+
+        while (physics.update(1, 50) > 0 && ticks < 5000) {
+            ticks++;
+        }
+
+        expect(ticks).toBeLessThan(5000);
+        expect(physics.budgetExceeded).toEqual(false);
+        expect(sand.length).toEqual(total);
+
+        // everything came to rest near the floor - a pile slides outward as it
+        // settles, so the footprint is wider than it started
+        let aloft = 0;
+
+        for (let x = 0; x < 32; x++) {
+            for (let z = 0; z < 32; z++) {
+                for (let y = 8; y < 32; y++) {
+                    aloft += sand.get(x, y, z);
+                }
+            }
+        }
+
+        expect(aloft).toEqual(0);
+    });
+
+    it('.update() - a budget of zero or less is unlimited', () => {
+        const physics = makePhysics();
+        const sand = physics.addLayer(VoxelPhysics.SAND);
+
+        for (let x = 0; x < 8; x++) {
+            for (let z = 0; z < 8; z++) {
+                sand.set(x, 30, z);
+            }
+        }
+
+        const moves = physics.update(1, 0);
+
+        expect(moves).toEqual(64);
+        expect(physics.budgetExceeded).toEqual(false);
+    });
 });

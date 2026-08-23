@@ -1,6 +1,7 @@
 import { MortonKey } from "../../math/morton-key.js";
 import { VoxelIndex } from "../voxel-index.js";
 import { VoxelChunk } from "./voxel-chunk.js";
+import { ChunkStorage } from "./chunk-storage.js";
 
 /**
  * VoxelChunk32 extends the base VoxelChunk functionality by allowing each voxel 
@@ -10,10 +11,15 @@ import { VoxelChunk } from "./voxel-chunk.js";
 export class VoxelChunk32 extends VoxelChunk {
 
     /**
+     * Number of bytes the meta-data storage occupies (32 bits per voxel).
+     */
+    public static readonly META_BYTE_LENGTH: number = (VoxelChunk.SIZE * 32) / 8;
+
+    /**
      * An ArrayBuffer to store the 32-bit meta-data for all voxels in the chunk.
      * Each VoxelChunk contains 64 voxels, and each voxel stores 32 bits (4 bytes) of meta-data.
      */
-    private readonly _metaDataBuffer: ArrayBuffer;
+    private readonly _metaDataBuffer: ArrayBufferLike;
 
     /**
      * A Uint32Array view of the ArrayBuffer that holds the meta-data for each voxel.
@@ -23,15 +29,23 @@ export class VoxelChunk32 extends VoxelChunk {
 
     /**
      * Constructs a VoxelChunk32 with a 32-bit meta-data buffer for each voxel.
-     * 
+     *
      * @param key - The MortonKey representing the chunk's location in the voxel map.
+     * @param storage - (Optional) Externally-owned storage for this chunk's data. When
+     * null, the chunk allocates and owns its own storage. See ChunkStorage.
      */
-    constructor(key: MortonKey) {
-        super(key);
+    constructor(key: MortonKey, storage: ChunkStorage | null = null) {
+        super(key, storage);
 
-        // Allocate enough space for 32 bits (4 bytes) of meta-data per voxel in the chunk (64 voxels).
-        this._metaDataBuffer = new ArrayBuffer((VoxelChunk.SIZE * 32) / 8);
-        this._metaData = new Uint32Array(this._metaDataBuffer);
+        // Allocate or view enough space for 32 bits of meta-data per voxel in the chunk (64 voxels).
+        if (storage !== null) {
+            this._metaDataBuffer = storage.buffer;
+            this._metaData = new Uint32Array(storage.buffer, storage.metaByteOffset, VoxelChunk.SIZE);
+        }
+        else {
+            this._metaDataBuffer = new ArrayBuffer(VoxelChunk32.META_BYTE_LENGTH);
+            this._metaData = new Uint32Array(this._metaDataBuffer);
+        }
     }
 
     /**

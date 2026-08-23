@@ -12,9 +12,30 @@ export class BitArray {
     public static readonly BITS_PER_ELEMENT: number = 32;
 
     /**
-     * The underlying ArrayBuffer that stores the raw data.
+     * Uniform state - the array holds a mix of set and unset bits.
      */
-    private readonly _buffer: ArrayBuffer;
+    public static readonly MIXED: number = -1;
+
+    /**
+     * Uniform state - every bit in the array is 0.
+     */
+    public static readonly EMPTY: number = 0;
+
+    /**
+     * Uniform state - every bit in the array is 1.
+     */
+    public static readonly FULL: number = 1;
+
+    /**
+     * A 32-bit element with every bit set.
+     */
+    private static readonly _ALL_BITS: number = 0xFFFFFFFF;
+
+    /**
+     * The underlying buffer that stores the raw data. Typed as ArrayBufferLike rather
+     * than ArrayBuffer so that a SharedArrayBuffer can back the storage.
+     */
+    private readonly _buffer: ArrayBufferLike;
 
     /**
      * A typed array view (Uint32Array) of the _buffer, allowing access to 32-bit chunks.
@@ -24,19 +45,62 @@ export class BitArray {
     /**
      * Initializes a new BitArray with a specified number of 32-bit elements.
      * Each element contains 32 bits, so the total number of bits is `elements * 32`.
-     * 
-     * @param elements - The number of 32-bit elements to allocate. Defaults to 1.
+     *
+     * By default the BitArray allocates and owns its storage. Passing a buffer makes it
+     * a view over memory the caller owns instead, which is what allows many chunks to
+     * be packed into one allocation - or into a SharedArrayBuffer, so that a worker can
+     * read live world state directly rather than through a serialized snapshot.
+     *
+     * @param elements - The number of 32-bit elements. Defaults to 1.
+     * @param buffer - (Optional) Existing storage to view. When null, storage is allocated.
+     * @param byteOffset - (Optional) Byte offset into the provided buffer. Must be a
+     * multiple of 4. Defaults to 0.
+     * @throws - Error if the provided buffer is misaligned or too small.
      */
-    constructor(elements = 1) {        // Allocate 4 bytes per element (since each Uint32 element is 4 bytes)
-        this._buffer = new ArrayBuffer(elements > 0 ? elements * 4 : 4);
-        this._array = new Uint32Array(this._buffer);
+    constructor(elements = 1, buffer: ArrayBufferLike | null = null, byteOffset = 0) {
+        const count: number = elements > 0 ? elements : 1;
+
+        if (buffer === null) {
+            // Allocate 4 bytes per element (since each Uint32 element is 4 bytes)
+            this._buffer = new ArrayBuffer(count * 4);
+            this._array = new Uint32Array(this._buffer);
+
+            return;
+        }
+
+        if ((byteOffset % 4) !== 0) {
+            throw new Error(`BitArray.constructor(number, ArrayBufferLike, number) - byteOffset must be a multiple of 4, was ${byteOffset}`);
+        }
+
+        if (byteOffset < 0 || (byteOffset + (count * 4)) > buffer.byteLength) {
+            throw new RangeError(`BitArray.constructor(number, ArrayBufferLike, number) - ${count} elements at byteOffset ${byteOffset} exceeds the buffer length of ${buffer.byteLength}`);
+        }
+
+        this._buffer = buffer;
+        this._array = new Uint32Array(buffer, byteOffset, count);
     }
 
     /**
-     * Returns the underlying ArrayBuffer that stores the raw data.
+     * Returns the underlying buffer that stores the raw data. When the BitArray is a
+     * view into caller-provided storage this is the whole of that storage - use
+     * byteOffset and byteLength to locate this BitArray's slice within it.
      */
-    public get buffer(): ArrayBuffer {
+    public get buffer(): ArrayBufferLike {
         return this._buffer;
+    }
+
+    /**
+     * Returns the byte offset of this BitArray's data within its buffer.
+     */
+    public get byteOffset(): number {
+        return this._array.byteOffset;
+    }
+
+    /**
+     * Returns the number of bytes this BitArray occupies within its buffer.
+     */
+    public get byteLength(): number {
+        return this._array.byteLength;
     }
 
     /**
@@ -180,6 +244,51 @@ export class BitArray {
 
         const value: number = this._array[index];
         this._array[index] = BitOps.toggleBitAt(value, pos % BitArray.BITS_PER_ELEMENT);
+    }
+
+    /**
+     * Reports whether the provided elements are entirely unset, entirely set, or a
+     * mix of the two.
+     *
+     * The scan exits at the first element that breaks uniformity, so a mixed array -
+     * which is what any chunk holding a surface looks like - normally costs one or two
+     * comparisons. Only a genuinely uniform array pays the full walk, and that is the
+     * case the result lets a caller skip entirely.
+     *
+     * This is deliberately computed on demand rather than cached against writes. The
+     * element storage is exposed directly and is written in place by the serializer,
+     * the physics solver and the geometry merge paths, so a cached flag would need an
+     * invalidation contract that every one of those has to honour. At roughly a
+     * hundred comparisons worst case, the scan is far cheaper than that risk.
+     *
+     * @param elements - The Uint32Array to inspect.
+     * @returns - BitArray.EMPTY, BitArray.FULL or BitArray.MIXED.
+     */
+    public static uniformState(elements: Uint32Array): number {
+        const length: number = elements.length;
+        const first: number = elements[0];
+
+        if (first !== 0 && first !== BitArray._ALL_BITS) {
+            return BitArray.MIXED;
+        }
+
+        for (let i = 1; i < length; i++) {
+            if (elements[i] !== first) {
+                return BitArray.MIXED;
+            }
+        }
+
+        return first === 0 ? BitArray.EMPTY : BitArray.FULL;
+    }
+
+    /**
+     * Reports whether this BitArray is entirely unset, entirely set, or a mix of the
+     * two (see BitArray.uniformState).
+     *
+     * @returns - BitArray.EMPTY, BitArray.FULL or BitArray.MIXED.
+     */
+    public get uniformState(): number {
+        return BitArray.uniformState(this._array);
     }
 
     /**

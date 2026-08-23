@@ -233,6 +233,18 @@ export class MortonKey implements Key {
         return this._key;
     }
 
+    /**
+     * Re-points this MortonKey at an already-encoded key value. Lets a caller reuse a
+     * single MortonKey when walking encoded keys - for example the dirty-chunk keys a
+     * remesh pass iterates - rather than allocating one per lookup. VoxelIndex has had
+     * the equivalent setter all along.
+     *
+     * @param value - The encoded 30-bit Morton key.
+     */
+    public set key(value: number) {
+        this._key = value | 0;
+    }
+
     public get x(): number {
         return MortonKey._DecodePart(this._key);
     }

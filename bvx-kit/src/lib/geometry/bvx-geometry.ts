@@ -78,21 +78,20 @@ export class BVXGeometry {
         }
 
         const geometryIndices: Uint8Array = geometry.indices;
-        const length: number = geometryIndices.length;
         const renderableIndices: Uint32Array[] = flipped ? indicesFlipped : indices;
+
+        // Walk only the BitVoxels that carry geometry. The touched list is ascending,
+        // so this emits the same index order as a full scan of the buffer would.
+        const touched: Uint16Array = geometry.touched;
+        const length: number = touched.length;
 
         let counter = 0;
 
-        for (let index = 0; index < length; index++) {
-            const gi: number = geometryIndices[index];
-
-            // Skip if the voxel face is not active (0 means no voxel face)
-            if (gi === 0) {
-                continue;
-            }
+        for (let t = 0; t < length; t++) {
+            const index: number = touched[t];
 
             // Retrieve the corresponding set of indices for the current voxel configuration
-            const configuration: Uint32Array = renderableIndices[gi];
+            const configuration: Uint32Array = renderableIndices[geometryIndices[index]];
             const clength: number = configuration.length;
 
             // Offset the indices by the voxel's position and add to the result array

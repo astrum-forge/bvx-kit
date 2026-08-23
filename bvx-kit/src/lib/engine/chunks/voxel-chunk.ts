@@ -1,6 +1,7 @@
 import { MortonKey } from "../../math/morton-key.js";
 import { BVXLayer } from "../layer/bvx-layer.js";
 import { VoxelIndex } from "../voxel-index.js";
+import { ChunkStorage } from "./chunk-storage.js";
 
 /**
  * A VoxelChunk represents a group of 64 voxels (4x4x4) and manages their states in a 3D voxel map. 
@@ -34,11 +35,13 @@ export abstract class VoxelChunk {
 
     /**
      * Constructs a new VoxelChunk for the given location in the voxel map.
-     * 
+     *
      * @param key - The MortonKey representing the location of this chunk.
+     * @param storage - (Optional) Externally-owned storage for this chunk's data. When
+     * null, the chunk allocates and owns its own storage. See ChunkStorage.
      */
-    constructor(key: MortonKey) {
-        this._layer = new BVXLayer();
+    constructor(key: MortonKey, storage: ChunkStorage | null = null) {
+        this._layer = storage !== null ? new BVXLayer(storage.buffer, storage.layerByteOffset) : new BVXLayer();
         this._key = key;
     }
 
@@ -64,6 +67,22 @@ export abstract class VoxelChunk {
      */
     public get layer(): BVXLayer {
         return this._layer;
+    }
+
+    /**
+     * Returns true when no BitVoxel in this chunk is set - the chunk is entirely air.
+     * Equivalent to `VoxelChunk.layer.isEmpty`.
+     */
+    public get isEmpty(): boolean {
+        return this._layer.isEmpty;
+    }
+
+    /**
+     * Returns true when every BitVoxel in this chunk is set - the chunk is entirely
+     * solid. Equivalent to `VoxelChunk.layer.isFull`.
+     */
+    public get isFull(): boolean {
+        return this._layer.isFull;
     }
 
     /**

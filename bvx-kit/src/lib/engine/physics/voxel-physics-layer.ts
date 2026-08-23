@@ -558,9 +558,11 @@ export class VoxelPhysicsLayer {
      * step in the coordinator's density order for displacement to behave.
      *
      * @param tick - The global simulation tick counter.
+     * @param maxMoves - (Optional) Stop the sweep once this many grains have moved.
+     * 0 or less means no limit. See VoxelPhysics.update() for the semantics.
      * @returns - The number of grains that moved this tick.
      */
-    public step(tick: number): number {
+    public step(tick: number, maxMoves = 0): number {
         if (this._activeChunks.size === 0) {
             return 0;
         }
@@ -619,6 +621,13 @@ export class VoxelPhysicsLayer {
                     this._chunks.delete(key);
                     this._dirty.add(key);
                 }
+            }
+
+            // Out of budget. The chunks not reached stay in the active set with their
+            // grains still awake, so the next tick resumes from here - the collapse
+            // takes more ticks rather than one long one.
+            if (maxMoves > 0 && moves >= maxMoves) {
+                break;
             }
         }
 

@@ -468,35 +468,117 @@ export class VoxelSmoothGeometry {
      * @param field - The field buffer to blur in place.
      */
     private _SmoothField(margin: number, field: Float32Array): void {
-        const dims: number = BVXLayer.DIMS;
         const fieldDims: number = VoxelSmoothGeometry._FIELD_DIMS;
         const scratch: Float32Array = this._fieldScratch;
+        const max: number = BVXLayer.DIMS + (2 * margin);
 
-        const min = 0;
-        const max: number = dims + (2 * margin);
+        // Ping-pong between the two buffers rather than copying back after every axis.
+        // Three passes is odd, so the result lands in scratch and one copy returns it.
+        VoxelSmoothGeometry._BlurX(field, scratch, max, fieldDims);
+        VoxelSmoothGeometry._BlurY(scratch, field, max, fieldDims);
+        VoxelSmoothGeometry._BlurZ(field, scratch, max, fieldDims);
 
-        const strides: number[] = [fieldDims * fieldDims, fieldDims, 1];
+        field.set(scratch);
+    }
 
-        // blur each axis in sequence, ping-ponging between field and scratch
-        for (let axis = 0; axis < 3; axis++) {
-            const stride: number = strides[axis];
+    /**
+     * Blurs along x, where the clamp depends only on the outermost loop variable and
+     * the stride spans a whole plane.
+     *
+     * The three axis passes are written out separately rather than driven by an axis
+     * parameter. A shared loop has to pick the axis coordinate with a ternary and test
+     * both clamps on every one of the ~14k samples per pass, and none of that work
+     * varies within the inner loop - specialising hoists all of it to the loop that
+     * actually changes it.
+     *
+     * @param src - The field to read.
+     * @param dst - The buffer to write the blurred result to.
+     * @param max - The exclusive upper bound of the active field region.
+     * @param fieldDims - The field's per-axis dimension.
+     */
+    private static _BlurX(src: Float32Array, dst: Float32Array, max: number, fieldDims: number): void {
+        const stride: number = fieldDims * fieldDims;
+        const last: number = max - 1;
 
-            for (let x = min; x < max; x++) {
-                for (let y = min; y < max; y++) {
-                    for (let z = min; z < max; z++) {
-                        const index: number = (x * fieldDims + y) * fieldDims + z;
+        for (let x = 0; x < max; x++) {
+            // clamped at the low and high edges of the blur axis
+            const prevStride: number = x > 0 ? stride : 0;
+            const nextStride: number = x < last ? stride : 0;
 
-                        // clamp reads at the buffer edges of the blur axis
-                        const axisCoord: number = axis === 0 ? x : (axis === 1 ? y : z);
-                        const prev: number = axisCoord > min ? field[index - stride] : field[index];
-                        const next: number = axisCoord < (max - 1) ? field[index + stride] : field[index];
+            for (let y = 0; y < max; y++) {
+                const rowStart: number = (x * fieldDims + y) * fieldDims;
 
-                        scratch[index] = (0.25 * prev) + (0.5 * field[index]) + (0.25 * next);
-                    }
+                for (let z = 0; z < max; z++) {
+                    const index: number = rowStart + z;
+
+                    dst[index] = (0.25 * src[index - prevStride]) + (0.5 * src[index]) + (0.25 * src[index + nextStride]);
                 }
             }
+        }
+    }
 
-            field.set(scratch);
+    /**
+     * Blurs along y, where the clamp depends on the middle loop variable and the
+     * stride spans a row. See _BlurX.
+     *
+     * @param src - The field to read.
+     * @param dst - The buffer to write the blurred result to.
+     * @param max - The exclusive upper bound of the active field region.
+     * @param fieldDims - The field's per-axis dimension.
+     */
+    private static _BlurY(src: Float32Array, dst: Float32Array, max: number, fieldDims: number): void {
+        const last: number = max - 1;
+
+        for (let x = 0; x < max; x++) {
+            const planeStart: number = x * fieldDims * fieldDims;
+
+            for (let y = 0; y < max; y++) {
+                const prevStride: number = y > 0 ? fieldDims : 0;
+                const nextStride: number = y < last ? fieldDims : 0;
+                const rowStart: number = planeStart + (y * fieldDims);
+
+                for (let z = 0; z < max; z++) {
+                    const index: number = rowStart + z;
+
+                    dst[index] = (0.25 * src[index - prevStride]) + (0.5 * src[index]) + (0.25 * src[index + nextStride]);
+                }
+            }
+        }
+    }
+
+    /**
+     * Blurs along z, where the clamp depends on the innermost loop variable. Peeling
+     * the first and last samples out leaves the interior loop - all but two of every
+     * row - completely branch-free. See _BlurX.
+     *
+     * @param src - The field to read.
+     * @param dst - The buffer to write the blurred result to.
+     * @param max - The exclusive upper bound of the active field region.
+     * @param fieldDims - The field's per-axis dimension.
+     */
+    private static _BlurZ(src: Float32Array, dst: Float32Array, max: number, fieldDims: number): void {
+        const last: number = max - 1;
+
+        for (let x = 0; x < max; x++) {
+            const planeStart: number = x * fieldDims * fieldDims;
+
+            for (let y = 0; y < max; y++) {
+                const rowStart: number = planeStart + (y * fieldDims);
+
+                // low edge - the previous sample clamps to the sample itself
+                dst[rowStart] = (0.75 * src[rowStart]) + (0.25 * src[rowStart + 1]);
+
+                for (let z = 1; z < last; z++) {
+                    const index: number = rowStart + z;
+
+                    dst[index] = (0.25 * src[index - 1]) + (0.5 * src[index]) + (0.25 * src[index + 1]);
+                }
+
+                // high edge - the next sample clamps to the sample itself
+                const end: number = rowStart + last;
+
+                dst[end] = (0.25 * src[end - 1]) + (0.75 * src[end]);
+            }
         }
     }
 
