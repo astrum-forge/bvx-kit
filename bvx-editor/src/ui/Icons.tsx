@@ -56,6 +56,17 @@ export const BlobIcon = ({ size = 18 }: IconProps) => (
     </svg>
 );
 
+export const WireframeIcon = ({ size = 18 }: IconProps) => (
+    <svg {...svgProps(size)}>
+        <path d="M12 2.5L21 7v10l-9 4.5L3 17V7z" />
+        <path d="M3 7l9 4.5L21 7" />
+        <path d="M12 11.5v10" />
+        <path d="M3 12h18" />
+        <path d="M7.5 4.75v14.5" />
+        <path d="M16.5 4.75v14.5" />
+    </svg>
+);
+
 export const UndoIcon = ({ size = 18 }: IconProps) => (
     <svg {...svgProps(size)}>
         <path d="M3 7v6h6" />

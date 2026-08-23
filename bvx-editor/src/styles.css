@@ -355,7 +355,9 @@ body {
 
 .segmented {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    /* one column per button, sized evenly - the render-mode control holds three */
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
     gap: 4px;
     background: var(--bg);
     border: 1px solid var(--border);
@@ -367,8 +369,11 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 5px;
     height: 30px;
+    min-width: 0;
+    padding: 0 4px;
+    white-space: nowrap;
     background: transparent;
     color: var(--text-dim);
     border: none;

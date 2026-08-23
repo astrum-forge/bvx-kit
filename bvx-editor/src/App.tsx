@@ -5,6 +5,7 @@ import {
     BlobIcon,
     BrushIcon,
     CubeIcon,
+    WireframeIcon,
     EraserIcon,
     LoadIcon,
     NewIcon,
@@ -182,10 +183,14 @@ export const App = () => {
                 case "1": case "2": case "3": case "4":
                     selectBrushSize(parseInt(event.key, 10));
                     break;
-                case "tab":
+                case "tab": {
                     event.preventDefault();
-                    selectRenderMode(renderMode === "blocky" ? "smooth" : "blocky");
+
+                    const order: RenderMode[] = ["blocky", "smooth", "wireframe"];
+
+                    selectRenderMode(order[(order.indexOf(renderMode) + 1) % order.length]);
                     break;
+                }
                 case " ":
                     event.preventDefault();
                     togglePlaying();
@@ -312,9 +317,12 @@ export const App = () => {
                             <button className={renderMode === "smooth" ? "active" : ""} onClick={() => selectRenderMode("smooth")}>
                                 <BlobIcon size={15} /> Smooth
                             </button>
+                            <button className={renderMode === "wireframe" ? "active" : ""} onClick={() => selectRenderMode("wireframe")}>
+                                <WireframeIcon size={15} /> Wire
+                            </button>
                         </div>
 
-                        <div className={`field ${renderMode === "blocky" ? "disabled" : ""}`}>
+                        <div className={`field ${renderMode !== "smooth" ? "disabled" : ""}`}>
                             <label>
                                 Smoothing
                                 <span className="field-value">{smoothing}</span>
@@ -325,7 +333,7 @@ export const App = () => {
                                 max={3}
                                 step={1}
                                 value={smoothing}
-                                disabled={renderMode === "blocky"}
+                                disabled={renderMode !== "smooth"}
                                 onChange={(event) => selectSmoothing(parseInt(event.target.value, 10))}
                             />
                         </div>
@@ -391,7 +399,7 @@ export const App = () => {
                             <div><dt>Space</dt><dd>Play / pause physics</dd></div>
                             <div><dt>F</dt><dd>Frame the scene</dd></div>
                             <div><dt>1 – 4, [ ]</dt><dd>Brush size</dd></div>
-                            <div><dt>Tab</dt><dd>Toggle render mode</dd></div>
+                            <div><dt>Tab</dt><dd>Cycle render mode</dd></div>
                             <div><dt>⌥ drag</dt><dd>Orbit (trackpad)</dd></div>
                             <div><dt>⌥⇧ drag</dt><dd>Pan (trackpad)</dd></div>
                             <div><dt>Ctrl+Z</dt><dd>Undo</dd></div>

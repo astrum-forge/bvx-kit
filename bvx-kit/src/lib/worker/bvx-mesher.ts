@@ -129,6 +129,23 @@ export interface MesherFacesResponse {
     faceMasks: Uint8Array;
 
     /**
+     * The BitVoxel indices carrying a non-zero mask, in ascending order
+     * (see VoxelGeometry.touched).
+     *
+     * A renderer building its own vertex data from faceMasks should walk this rather
+     * than scanning all 4096 entries: most chunks in a world with depth are uniform
+     * and produce nothing, and even a surface chunk typically populates only a few
+     * hundred of them.
+     */
+    touched: Uint16Array;
+
+    /**
+     * The total number of visible faces across every mask - what the renderer needs
+     * to size its buffers, without counting them itself.
+     */
+    faceCount: number;
+
+    /**
      * Renderable triangle indices into the static BVXGeometry lookup tables.
      */
     indices: Uint32Array;
@@ -234,6 +251,8 @@ export class BVXMesher {
                     type: "faces",
                     chunkKey: request.chunkKey,
                     faceMasks: new Uint8Array(0),
+                    touched: new Uint16Array(0),
+                    faceCount: 0,
                     indices: new Uint32Array(0)
                 };
             }
@@ -246,6 +265,8 @@ export class BVXMesher {
                 type: "faces",
                 chunkKey: request.chunkKey,
                 faceMasks: new Uint8Array(geometry.indices),
+                touched: new Uint16Array(geometry.touched),
+                faceCount: geometry.popCount(),
                 indices: BVXGeometry.getIndices(geometry, request.flipped)
             };
         }
@@ -285,7 +306,7 @@ export class BVXMesher {
      */
     public static transferables(response: MesherResponse): ArrayBuffer[] {
         if (response.type === "faces") {
-            return [response.faceMasks.buffer as ArrayBuffer, response.indices.buffer as ArrayBuffer];
+            return [response.faceMasks.buffer as ArrayBuffer, response.touched.buffer as ArrayBuffer, response.indices.buffer as ArrayBuffer];
         }
 
         return [response.vertices.buffer as ArrayBuffer, response.normals.buffer as ArrayBuffer, response.indices.buffer as ArrayBuffer];

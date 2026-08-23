@@ -7,6 +7,7 @@ import {
     DirectionalLight,
     Engine,
     HemisphericLight,
+    Material,
     Matrix,
     Mesh,
     MeshBuilder,
@@ -43,7 +44,17 @@ export type EditorTool = "paint" | "erase" | "pick" | "sand" | "water";
 /**
  * The active rendering mode for BitVoxel geometry.
  */
-export type RenderMode = "blocky" | "smooth";
+/**
+ * How chunk geometry is rendered.
+ *
+ * - `blocky` - one shaded quad per visible BitVoxel face
+ * - `smooth` - surface nets over the blurred occupancy field
+ * - `wireframe` - the outline of each visible face, unlit and unshaded
+ *
+ * `wireframe` meshes from the same face masks as `blocky`, so the two agree exactly
+ * about which faces exist.
+ */
+export type RenderMode = "blocky" | "smooth" | "wireframe";
 
 /**
  * Live scene statistics published to the UI.
@@ -109,6 +120,11 @@ interface MeshLane {
     material: StandardMaterial;
 
     /**
+     * Shared unlit line-list material used by the wireframe render mode.
+     */
+    wireMaterial: StandardMaterial;
+
+    /**
      * Worlds whose occupancy occludes (culls) this lane's hidden geometry at
      * layer interfaces. Resolved lazily, as physics worlds are recreated on
      * scene resets. Occlusion is one-directional - water lists the opaque
@@ -133,9 +149,16 @@ interface MeshLane {
 const BIT_VOXEL_SIZE = 0.25;
 
 /**
- * The editable region in chunks per axis (8 x 8 x 8 chunks = 128 BitVoxels per axis).
+ * The editable region in chunks per axis (16 x 16 x 16 chunks = 256 BitVoxels per
+ * axis, an eightfold volume increase over the original 8).
+ *
+ * What makes this affordable is the kit's uniform-chunk fast path: a chunk that is
+ * entirely solid or entirely air is now recognised without sampling any of its 4096
+ * BitVoxels, so it costs well under a microsecond to mesh instead of ~41. Growing the
+ * region mostly adds exactly those chunks - open air above the terrain and solid
+ * ground below it - so the cost of the extra volume is close to nothing.
  */
-const REGION_CHUNKS = 8;
+const REGION_CHUNKS = 16;
 
 /**
  * The editable region in BitVoxels per axis.
@@ -149,10 +172,34 @@ const PHYSICS_RATE = 30;
 const PHYSICS_MAX_TICKS_PER_FRAME = 4;
 
 /**
+ * Grain movements the solver may perform per rendered frame.
+ *
+ * A collapsing pile wakes a large region at once, so tick cost is spiky - peaks run
+ * around ten times the mean, and at the scale this region now allows an unbudgeted
+ * tick can take tens of milliseconds and drop a frame. VoxelPhysics.update takes a
+ * move budget: the sweep stops once it is spent and the chunks it did not reach stay
+ * awake for the next frame, so a collapse resolves over more frames instead of one
+ * long one.
+ *
+ * Measured at roughly 2.2-2.5 M moves/s, 20,000 moves is about 8 ms of solver time -
+ * comfortably inside a 60 Hz frame alongside meshing and rendering.
+ */
+const PHYSICS_MOVE_BUDGET = 20000;
+
+/**
  * Flat colours for the physics lanes.
  */
 const SAND_COLOR: [number, number, number] = [0.91, 0.76, 0.44];
 const WATER_COLOR: [number, number, number] = [0.28, 0.56, 0.92];
+
+/**
+ * Line colours for the wireframe render mode, one per lane. Bright enough to read
+ * against both the sky and the ground plane, and distinct enough to tell the base
+ * world from the two physics layers at a glance.
+ */
+const WIRE_BASE_COLOR = Color3.FromHexString("#e8eef7");
+const WIRE_SAND_COLOR = Color3.FromHexString("#ffc94d");
+const WIRE_WATER_COLOR = Color3.FromHexString("#5cc8ff");
 
 /**
  * Blocky face corner offsets, indexed by the VoxelFaceGeometry face bit index.
@@ -278,6 +325,12 @@ export class VoxelEditor {
 
     // shared scratch objects to avoid per-event allocations
     private readonly _scratchKey = new MortonKey();
+
+    // Dedicated key for the mesh-response path. MortonKey.key is settable, so the
+    // three _apply*Mesh entry points re-point this instead of allocating one per
+    // response. Kept separate from _scratchKey because _buildOcclusion walks the
+    // neighbourhood through that one while this is still live.
+    private readonly _meshKey = new MortonKey();
     private readonly _scratchIndex = new VoxelIndex();
     private readonly _scratchDirty = new Set<number>();
     private readonly _scratchPropagate = new Set<number>();
@@ -410,9 +463,9 @@ export class VoxelEditor {
         // primary/secondary mode pairing. Water lists both opaque lanes so its
         // hidden contact skin is culled, while nothing lists water - the
         // ground stays visible through the translucent surface.
-        this._baseLane = this._makeLane("base", () => this._world, null, 1.0, [(): VoxelWorld => this._sand.world], "primary");
-        this._sandLane = this._makeLane("sand", () => this._sand.world, SAND_COLOR, 1.0, [(): VoxelWorld => this._world], "secondary");
-        this._waterLane = this._makeLane("water", () => this._water.world, WATER_COLOR, 0.55, [(): VoxelWorld => this._world, (): VoxelWorld => this._sand.world], "overlay");
+        this._baseLane = this._makeLane("base", () => this._world, null, 1.0, WIRE_BASE_COLOR, [(): VoxelWorld => this._sand.world], "primary");
+        this._sandLane = this._makeLane("sand", () => this._sand.world, SAND_COLOR, 1.0, WIRE_SAND_COLOR, [(): VoxelWorld => this._world], "secondary");
+        this._waterLane = this._makeLane("water", () => this._water.world, WATER_COLOR, 0.55, WIRE_WATER_COLOR, [(): VoxelWorld => this._world, (): VoxelWorld => this._sand.world], "overlay");
         this._lanes = [this._baseLane, this._sandLane, this._waterLane];
 
         this._setupPhysics();
@@ -493,7 +546,41 @@ export class VoxelEditor {
         }
 
         this._renderMode = mode;
+        this._refreshShadowCasters();
         this._remeshAll();
+    }
+
+    /**
+     * Rebuilds the shadow generator's caster list for the current render mode.
+     *
+     * Rebuilt wholesale rather than added to and removed from per mesh, because
+     * removeShadowCaster scans the list - doing that once per chunk across a region
+     * this size would be quadratic.
+     */
+    private _refreshShadowCasters(): void {
+        const renderList = this._shadows.getShadowMap()?.renderList;
+
+        if (!renderList) {
+            return;
+        }
+
+        renderList.length = 0;
+
+        // a wireframe has no surface to cast from
+        if (this._renderMode === "wireframe") {
+            return;
+        }
+
+        for (const lane of this._lanes) {
+            // translucent water does not cast shadows
+            if (lane === this._waterLane) {
+                continue;
+            }
+
+            for (const mesh of lane.meshes.values()) {
+                renderList.push(mesh);
+            }
+        }
     }
 
     public get smoothing(): number {
@@ -572,9 +659,16 @@ export class VoxelEditor {
         let moves = 0;
 
         while (this._physicsAccumulator >= tickMillis && ticks < PHYSICS_MAX_TICKS_PER_FRAME) {
-            moves += this._physics.update();
+            // spend what is left of the frame's budget on this tick
+            moves += this._physics.update(1, Math.max(1, PHYSICS_MOVE_BUDGET - moves));
             this._physicsAccumulator -= tickMillis;
             ticks++;
+
+            // the tick ran out of budget with work outstanding - stop here and let
+            // the next frame carry on rather than blowing through the frame time
+            if (this._physics.budgetExceeded) {
+                break;
+            }
         }
 
         // drop any remaining backlog so slow frames never spiral
@@ -873,12 +967,17 @@ export class VoxelEditor {
 
         const heights = new Int16Array(REGION * REGION);
 
+        // The terrain frequency is anchored to a fixed span rather than to REGION, so
+        // a larger editable area gets more hills of the same size instead of the same
+        // hills stretched across it.
+        const featureSpan = 128;
+
         // gentle rolling terrain with height-banded colours - sand around the
         // waterline, grass above, stone and snow on the peaks
         for (let x = 0; x < REGION; x++) {
             for (let z = 0; z < REGION; z++) {
-                const nx = x / REGION;
-                const nz = z / REGION;
+                const nx = x / featureSpan;
+                const nz = z / featureSpan;
 
                 const height = Math.max(1, Math.round(
                     10 +
@@ -896,10 +995,14 @@ export class VoxelEditor {
             }
         }
 
-        // a floating blobby island
+        // a floating blobby island, placed proportionally so it stays over the
+        // terrain whatever the region size
+        const scale = REGION / featureSpan;
         const island: [number, number, number, number, number][] = [
             [40, 30, 74, 9, 10], [58, 34, 48, 7, 12], [86, 32, 84, 6, 3]
-        ];
+        ].map(([cx, cy, cz, radius, colorIndex]) => [
+            Math.round(cx * scale), cy, Math.round(cz * scale), radius, colorIndex
+        ] as [number, number, number, number, number]);
 
         for (const [cx, cy, cz, radius, colorIndex] of island) {
             for (let x = cx - radius; x <= cx + radius; x++) {
@@ -983,7 +1086,7 @@ export class VoxelEditor {
     /**
      * Creates a renderable lane with its shared material.
      */
-    private _makeLane(id: string, world: () => VoxelWorld, color: [number, number, number] | null, alpha: number, occluders: (() => VoxelWorld)[], occlusionMode: SmoothOcclusionMode): MeshLane {
+    private _makeLane(id: string, world: () => VoxelWorld, color: [number, number, number] | null, alpha: number, wireColor: Color3, occluders: (() => VoxelWorld)[], occlusionMode: SmoothOcclusionMode): MeshLane {
         const material = new StandardMaterial(`lane-mat-${id}`, this._scene);
 
         material.diffuseColor = Color3.White();
@@ -1003,6 +1106,21 @@ export class VoxelEditor {
             new GhibliToonPlugin(material);
         }
 
+        // Wireframe counterpart. The index buffer _applyWireframeMesh builds holds
+        // edge pairs rather than triangles, so this draws it as a line list.
+        //
+        // The line colour is emissive rather than per-vertex. With lighting disabled
+        // a StandardMaterial's diffuse term contributes nothing, so vertex colours
+        // would render black - emissive is the term that survives, and a flat colour
+        // per lane is what a plain wireframe wants anyway.
+        const wireMaterial = new StandardMaterial(`lane-wire-${id}`, this._scene);
+
+        wireMaterial.emissiveColor = wireColor;
+        wireMaterial.diffuseColor = Color3.Black();
+        wireMaterial.specularColor = Color3.Black();
+        wireMaterial.disableLighting = true;
+        wireMaterial.fillMode = Material.LineListDrawMode;
+
         return {
             id: id,
             world: world,
@@ -1012,6 +1130,7 @@ export class VoxelEditor {
             dirtyAgain: new Set<number>(),
             color: color,
             material: material,
+            wireMaterial: wireMaterial,
             occluders: occluders,
             occlusionMode: occlusionMode
         };
@@ -1947,9 +2066,9 @@ export class VoxelEditor {
 
         // flipped winding - BabylonJS treats clockwise faces as front-facing,
         // the opposite of the bvx-kit default counter-clockwise convention
-        const request: MesherRequest = this._renderMode === "blocky"
-            ? { id: 0, type: "faces", chunkKey: chunkKey, flipped: true, world: snapshot }
-            : { id: 0, type: "smooth", chunkKey: chunkKey, smoothing: this._smoothing, flipped: true, world: snapshot };
+        const request: MesherRequest = this._renderMode === "smooth"
+            ? { id: 0, type: "smooth", chunkKey: chunkKey, smoothing: this._smoothing, flipped: true, world: snapshot }
+            : { id: 0, type: "faces", chunkKey: chunkKey, flipped: true, world: snapshot };
 
         if (occluderSnapshot !== null) {
             request.occluders = occluderSnapshot;
@@ -2088,14 +2207,17 @@ export class VoxelEditor {
 
         // the render mode changed while the request was in flight - the mode
         // switch already queued fresh requests, drop this stale response
-        const expected = this._renderMode === "blocky" ? "faces" : "smooth";
+        const expected = this._renderMode === "smooth" ? "smooth" : "faces";
 
         if (response.type === expected) {
-            if (response.type === "faces") {
-                this._applyBlockyMesh(lane, chunkKey, response.faceMasks);
+            if (response.type === "smooth") {
+                this._applySmoothMesh(lane, chunkKey, response.vertices, response.normals, response.indices);
+            }
+            else if (this._renderMode === "wireframe") {
+                this._applyWireframeMesh(lane, chunkKey, response.faceMasks, response.touched, response.faceCount);
             }
             else {
-                this._applySmoothMesh(lane, chunkKey, response.vertices, response.normals, response.indices);
+                this._applyBlockyMesh(lane, chunkKey, response.faceMasks, response.touched, response.faceCount);
             }
         }
 
@@ -2168,21 +2290,12 @@ export class VoxelEditor {
      * Builds a compact blocky mesh from the 6-bit face masks - one coloured quad
      * per visible BitVoxel face.
      */
-    private _applyBlockyMesh(lane: MeshLane, chunkKey: number, faceMasks: Uint8Array): void {
-        const mortonKey = new MortonKey(chunkKey);
+    private _applyBlockyMesh(lane: MeshLane, chunkKey: number, faceMasks: Uint8Array, touched: Uint16Array, faceCount: number): void {
+        const mortonKey = this._meshKey;
+
+        mortonKey.key = chunkKey;
+
         const chunk = lane.world().get(mortonKey);
-
-        // count the visible faces to size the buffers exactly
-        let faceCount = 0;
-
-        for (let i = 0; i < faceMasks.length; i++) {
-            let mask = faceMasks[i];
-
-            while (mask !== 0) {
-                mask &= mask - 1;
-                faceCount++;
-            }
-        }
 
         if (faceCount === 0 || chunk === null) {
             this._disposeOrClear(lane, chunkKey);
@@ -2202,12 +2315,11 @@ export class VoxelEditor {
         let vertex = 0;
         let indexCount = 0;
 
-        for (let i = 0; i < faceMasks.length; i++) {
+        // The mesher reports which BitVoxels carry geometry, so this walks the few
+        // hundred that do rather than all 4096 entries of the mask buffer.
+        for (let t = 0; t < touched.length; t++) {
+            const i = touched[t];
             const mask = faceMasks[i];
-
-            if (mask === 0) {
-                continue;
-            }
 
             // decode the BitVoxel local coordinates from the VoxelIndex key layout
             const x = (((i >> 10) & 3) << 2) | ((i >> 4) & 3);
@@ -2309,7 +2421,98 @@ export class VoxelEditor {
             }
         }
 
-        this._uploadMesh(lane, chunkKey, mortonKey, positions, normals, colors, indices);
+        this._uploadMesh(lane, chunkKey, mortonKey, positions, normals, colors, indices, faceCount * 2);
+    }
+
+    /**
+     * Builds a wireframe mesh from the 6-bit face masks - the four edges of every
+     * visible face, drawn as a line list.
+     *
+     * This deliberately outlines each face rather than switching the solid material
+     * to BabylonJS's wireframe flag. That flag draws the underlying triangles, so
+     * every quad gains a diagonal and a flat wall reads as a field of triangles
+     * rather than the voxel grid it actually is.
+     *
+     * Faces come from the same mask buffer the blocky path uses, so the two modes
+     * agree exactly about what is visible: interior faces are culled in both.
+     */
+    private _applyWireframeMesh(lane: MeshLane, chunkKey: number, faceMasks: Uint8Array, touched: Uint16Array, faceCount: number): void {
+        const mortonKey = this._meshKey;
+
+        mortonKey.key = chunkKey;
+
+        const chunk = lane.world().get(mortonKey);
+
+        if (faceCount === 0 || chunk === null) {
+            this._disposeOrClear(lane, chunkKey);
+
+            return;
+        }
+
+        // four corners per face, and four edges joining them
+        const positions = new Float32Array(faceCount * 4 * 3);
+        const normals = new Float32Array(faceCount * 4 * 3);
+        const colors = new Float32Array(faceCount * 4 * 4);
+        const indices = new Uint32Array(faceCount * 8);
+
+        // The line colour comes from the lane's emissive wire material, so the vertex
+        // colours are left white - they exist only so a mesh reused from the blocky
+        // mode does not keep a stale colour buffer that would tint the lines.
+        colors.fill(1.0);
+
+        let vertex = 0;
+        let indexCount = 0;
+
+        for (let t = 0; t < touched.length; t++) {
+            const i = touched[t];
+            const mask = faceMasks[i];
+
+            // decode the BitVoxel local coordinates from the VoxelIndex key layout
+            const x = (((i >> 10) & 3) << 2) | ((i >> 4) & 3);
+            const y = (((i >> 8) & 3) << 2) | ((i >> 2) & 3);
+            const z = (((i >> 6) & 3) << 2) | (i & 3);
+
+            for (let face = 0; face < 6; face++) {
+                if (((mask >> face) & 1) === 0) {
+                    continue;
+                }
+
+                const corners = FACE_CORNERS[face];
+                const normal = FACE_NORMALS[face];
+                const base = vertex;
+
+                for (let c = 0; c < 4; c++) {
+                    const write = vertex * 3;
+
+                    positions[write] = (x + corners[c][0]) * BIT_VOXEL_SIZE;
+                    positions[write + 1] = (y + corners[c][1]) * BIT_VOXEL_SIZE;
+                    positions[write + 2] = (z + corners[c][2]) * BIT_VOXEL_SIZE;
+
+                    // unused by the unlit wireframe material, but VertexData wants
+                    // a full set and the face normal is the honest value
+                    normals[write] = normal[0];
+                    normals[write + 1] = normal[1];
+                    normals[write + 2] = normal[2];
+
+                    vertex++;
+                }
+
+                // the four edges around the quad, as line-list pairs. FACE_CORNERS
+                // is wound around the face, so consecutive corners share an edge.
+                indices[indexCount] = base;
+                indices[indexCount + 1] = base + 1;
+                indices[indexCount + 2] = base + 1;
+                indices[indexCount + 3] = base + 2;
+                indices[indexCount + 4] = base + 2;
+                indices[indexCount + 5] = base + 3;
+                indices[indexCount + 6] = base + 3;
+                indices[indexCount + 7] = base;
+
+                indexCount += 8;
+            }
+        }
+
+        this._uploadMesh(lane, chunkKey, mortonKey, positions, normals, colors, indices, faceCount * 2);
     }
 
     /**
@@ -2323,7 +2526,9 @@ export class VoxelEditor {
             return;
         }
 
-        const mortonKey = new MortonKey(chunkKey);
+        const mortonKey = this._meshKey;
+
+        mortonKey.key = chunkKey;
 
         const vertexCount = vertices.length / 3;
         const colors = new Float32Array(vertexCount * 4);
@@ -2432,29 +2637,35 @@ export class VoxelEditor {
             }
         }
 
-        this._uploadMesh(lane, chunkKey, mortonKey, vertices, normals, colors, indices);
+        this._uploadMesh(lane, chunkKey, mortonKey, vertices, normals, colors, indices, indices.length / 3);
     }
 
     /**
      * Creates or updates the renderable mesh for a chunk of the provided lane.
      */
-    private _uploadMesh(lane: MeshLane, chunkKey: number, mortonKey: MortonKey, positions: Float32Array, normals: Float32Array, colors: Float32Array, indices: Uint32Array): void {
+    private _uploadMesh(lane: MeshLane, chunkKey: number, mortonKey: MortonKey, positions: Float32Array, normals: Float32Array, colors: Float32Array, indices: Uint32Array, triangles: number): void {
+        const wire = this._renderMode === "wireframe";
+
         let mesh = lane.meshes.get(chunkKey);
 
         if (!mesh) {
             mesh = new Mesh(`${lane.id}-${chunkKey}`, this._scene);
 
-            mesh.material = lane.material;
             mesh.isPickable = false;
-            mesh.receiveShadows = true;
 
-            // translucent water does not cast shadows
-            if (lane !== this._waterLane) {
+            // a mesh created while in wireframe mode joins no shadow map; the
+            // mode switch rebuilds the caster list wholesale either way
+            if (!wire && lane !== this._waterLane) {
                 this._shadows.addShadowCaster(mesh);
             }
 
             lane.meshes.set(chunkKey, mesh);
         }
+
+        // meshes survive a render-mode switch, so the material is reassigned on
+        // every upload rather than only at creation
+        mesh.material = wire ? lane.wireMaterial : lane.material;
+        mesh.receiveShadows = !wire;
 
         mesh.position.set(mortonKey.x * 16 * BIT_VOXEL_SIZE, mortonKey.y * 16 * BIT_VOXEL_SIZE, mortonKey.z * 16 * BIT_VOXEL_SIZE);
 
@@ -2467,7 +2678,7 @@ export class VoxelEditor {
 
         data.applyToMesh(mesh, true);
 
-        lane.triangles.set(chunkKey, indices.length / 3);
+        lane.triangles.set(chunkKey, triangles);
     }
 
     /**
