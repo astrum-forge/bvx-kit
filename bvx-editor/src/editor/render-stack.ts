@@ -1,4 +1,5 @@
 import {
+    BoundingInfo,
     CascadedShadowGenerator,
     Color3,
     Color4,
@@ -139,6 +140,25 @@ export const createRenderStack = (scene: Scene, camera: Camera, regionUnits: num
     shadows.normalBias = 0.018;
     shadows.darkness = 0.06;
     shadows.transparencyShadow = false;
+
+    // The caster bounds are supplied rather than derived. Left alone, the
+    // generator adds an onBeforeRender observable that recomputes them from every
+    // caster's bounding info on every frame, and the caster list here is every
+    // chunk in the region - a walk of several hundred meshes per frame to arrive
+    // at a box that cannot change, because a chunk mesh is placed once and never
+    // moves.
+    //
+    // Freezing alone would be wrong: the setter snaps the bounds immediately, and
+    // at this point the caster list is still empty, which would freeze them at
+    // the empty-set sentinel. So the region's own extent is handed over straight
+    // afterwards. It is deliberately the whole editable volume rather than a
+    // tight fit around current geometry - the value only has to contain every
+    // caster, and this one does so for anything the user can ever build.
+    shadows.freezeShadowCastersBoundingInfo = true;
+    shadows.shadowCastersBoundingInfo = new BoundingInfo(
+        new Vector3(0, 0, 0),
+        new Vector3(regionUnits, regionUnits, regionUnits)
+    );
 
     // The shadow map is re-rendered every other frame, and this one line is
     // worth more than every other optimisation in this file combined: the

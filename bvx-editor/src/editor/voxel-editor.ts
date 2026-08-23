@@ -9,6 +9,7 @@ import {
     Scene,
     StandardMaterial,
     Vector3,
+    VertexBuffer,
     VertexData,
     WebGPUEngine,
     type CascadedShadowGenerator
@@ -112,6 +113,32 @@ interface MeshLane {
     triangles: Map<number, number>;
 
     /**
+     * How much each chunk mesh's vertex and index buffers were sized for, which
+     * is deliberately more than the geometry that was in them.
+     *
+     * Babylon's setVerticesData always allocates a new VertexBuffer and releases
+     * the old one, so re-uploading a chunk through VertexData.applyToMesh means
+     * a fresh set of WebGPU buffers every remesh: measured over a full remesh of
+     * this region's 499 chunks, 5,817 device buffer allocations and 38.8 MB.
+     * Growing the buffers past what the chunk needs lets the common case take
+     * updateVerticesData instead, which writes into the buffer already there.
+     */
+    capacity: Map<number, { vertices: number, indices: number }>;
+
+    /**
+     * Chunks that want a remesh but have not been sent to a worker yet.
+     *
+     * Nothing is serialized when a chunk is queued - only when the frame's
+     * meshing budget reaches it. That is the point: a physics tick can dirty
+     * over a hundred chunks at once, and each request costs about 0.17 ms of
+     * synchronous serialization on this thread, so honouring a whole drain
+     * immediately is a twenty-millisecond stall. Queueing also coalesces - a
+     * chunk dirtied on three successive ticks before the budget reaches it is
+     * serialized once, from its latest state.
+     */
+    pending: Set<number>;
+
+    /**
      * Meshing bookkeeping - chunks with a request in flight and chunks that
      * were re-dirtied while their request was still running (latest-wins).
      */
@@ -182,19 +209,65 @@ const PHYSICS_RATE = 30;
 const PHYSICS_MAX_TICKS_PER_FRAME = 4;
 
 /**
- * Grain movements the solver may perform per rendered frame.
+ * Milliseconds per rendered frame the solver may spend.
  *
  * A collapsing pile wakes a large region at once, so tick cost is spiky - peaks run
  * around ten times the mean, and at the scale this region now allows an unbudgeted
- * tick can take tens of milliseconds and drop a frame. VoxelPhysics.update takes a
- * move budget: the sweep stops once it is spent and the chunks it did not reach stay
- * awake for the next frame, so a collapse resolves over more frames instead of one
- * long one.
+ * tick can take tens of milliseconds and drop a frame.
  *
- * Measured at roughly 2.2-2.5 M moves/s, 20,000 moves is about 8 ms of solver time -
- * comfortably inside a 60 Hz frame alongside meshing and rendering.
+ * This is a wall-clock budget, converted per tick into the kit's work budget -
+ * VoxelPhysics.update's maxWork, denominated in cell probes. Not its move budget,
+ * which does not bound the cost: a grain that FAILS to move is not a move but
+ * still pays for the probes that discovered it cannot, and for water that search
+ * is the most expensive thing the solver does. Measured over a collapsing lake,
+ * a tick doing 6,000 moves took 10.2 ms while one doing 21,620 took 32.8 ms.
+ * Worse, the old 20,000-move constant was calibrated against a throughput of
+ * 2.2-2.5 M moves/s when the measured rate is ~360 K/s, so it authorised roughly
+ * 55 ms of solver per frame and never bound anything.
+ *
+ * Probes are the right unit because they are what the time goes on. Measured over
+ * the same collapse, the spread of the per-millisecond rate is 0.15 for probes
+ * against 0.53 for moves - three and a half times the predictive power - and
+ * capping probes took the worst tick from 26.3 ms to 5.5 ms with nothing over
+ * 8 ms, where capping moves at the same mean throughput left a 26 ms peak.
+ *
+ * Ticks stop as soon as the frame's budget is spent, and whatever stayed awake
+ * carries over to the next frame, so a collapse resolves over more frames rather
+ * than one long one. Total simulation work is unchanged - only its distribution.
  */
-const PHYSICS_MOVE_BUDGET = 20000;
+const PHYSICS_BUDGET_MS = 4.0;
+
+/**
+ * Starting estimate of solver throughput in cell probes per millisecond, replaced
+ * by measurement after the first substantial tick. Deliberately below the ~51,000
+ * measured on an M1, so the first spike of a session is under-budgeted rather
+ * than over.
+ */
+const PHYSICS_WORK_PER_MS = 30000;
+
+/**
+ * Milliseconds per frame the main thread may spend on meshing, and the share of
+ * that the applying half may take before the sending half gets the remainder.
+ *
+ * These are the numbers that decide whether a physics spike is a slow frame or a
+ * freeze. A request costs about 0.17 ms of serialization here before it reaches a
+ * worker, and applying a response costs a comparable amount of vertex building
+ * plus a replacement of the mesh's GPU buffers. A collapsing water body dirties
+ * over a hundred chunks in a single physics tick, so uncapped that drain is
+ * upwards of twenty milliseconds landing between two frames.
+ *
+ * The two are one budget, not two: applying runs first and may use up to
+ * MESH_APPLY_BUDGET_MS, then sending runs against what is left of
+ * MESH_FRAME_BUDGET_MS. Splitting it this way stops a long backlog of responses
+ * from starving new requests entirely, and vice versa.
+ *
+ * Sized against a 60 Hz frame with the solver alongside: 4 ms of meshing plus
+ * PHYSICS_BUDGET_MS leaves the renderer its half of the 16.7 ms. Raising it makes
+ * the simulation look more immediate and the frame time spikier; the queue drains
+ * in full either way, just over more frames.
+ */
+const MESH_FRAME_BUDGET_MS = 4.0;
+const MESH_APPLY_BUDGET_MS = 2.5;
 
 /**
  * Flat colours for the physics lanes.
@@ -355,6 +428,10 @@ export class VoxelEditor {
     private _physicsAccumulator = 0;
     private _physicsWasMoving = false;
 
+    // measured solver throughput in cell probes per millisecond, used to turn the
+    // frame's wall-clock physics budget into the work cap VoxelPhysics.update takes
+    private _workPerMs = PHYSICS_WORK_PER_MS;
+
     // renderable lanes - base world plus one per physics layer
     private readonly _baseLane: MeshLane;
     private readonly _sandLane: MeshLane;
@@ -420,6 +497,17 @@ export class VoxelEditor {
     // per-vertex accumulators reused by the smooth colour relaxation pass
     private _relaxColors = new Float32Array(0);
     private _relaxWeights = new Float32Array(0);
+
+    // Worker responses waiting to be turned into meshes, oldest first, and the
+    // lane the frame's request budget starts from. Responses are held rather
+    // than applied on arrival so a burst of them cannot stall a frame - see
+    // _pumpMeshQueue.
+    private readonly _readyResponses: { lane: MeshLane, response: MesherResponse }[] = [];
+    private _pumpCursor = 0;
+
+    // scratch corners for the chunk bounding box set on every upload
+    private readonly _boundsMin = new Vector3();
+    private readonly _boundsMax = new Vector3();
 
     // throttled stats publishing - _statsDirty marks a dropped publish that the
     // render loop flushes once the throttle window has passed
@@ -569,6 +657,10 @@ export class VoxelEditor {
             this._updateCameraGoal();
             this._updatePhysics();
 
+            // meshing after physics, so a tick's dirty chunks can be serviced by
+            // the same frame that produced them when the budget allows
+            this._pumpMeshQueue();
+
             // republish on a slow cadence even when nothing changed, so the
             // frame-rate readout keeps ticking on an idle scene
             if (performance.now() - this._statsTimer >= (this._statsDirty ? 250 : 500)) {
@@ -662,7 +754,13 @@ export class VoxelEditor {
             }
 
             for (const mesh of lane.meshes.values()) {
-                renderList.push(mesh);
+                // A chunk that lost its geometry is kept as a hidden mesh rather
+                // than disposed (see _disposeOrClear), and its stale geometry
+                // with it - so visibility, not presence in the map, is what says
+                // whether there is anything here to cast a shadow.
+                if (mesh.isVisible) {
+                    renderList.push(mesh);
+                }
             }
         }
     }
@@ -770,21 +868,50 @@ export class VoxelEditor {
         this._physicsAccumulator += this._engine.getDeltaTime();
 
         const tickMillis = 1000 / PHYSICS_RATE;
+        const started = performance.now();
 
         let ticks = 0;
         let moves = 0;
+        let work = 0;
+        let elapsed = 0;
 
         while (this._physicsAccumulator >= tickMillis && ticks < PHYSICS_MAX_TICKS_PER_FRAME) {
-            // spend what is left of the frame's budget on this tick
-            moves += this._physics.update(1, Math.max(1, PHYSICS_MOVE_BUDGET - moves));
+            // Convert what is left of the frame's wall-clock budget into a probe
+            // cap, at the rate this machine has been managing. Never below a
+            // floor: a tick allowed no work cannot make progress, and a stalled
+            // solver is worse than a slightly long frame.
+            const remaining = Math.max(0.5, PHYSICS_BUDGET_MS - elapsed);
+            const allowance = Math.max(20000, Math.round(remaining * this._workPerMs));
+
+            moves += this._physics.update(1, 0, allowance);
+            work += this._sand.workPerformed + this._water.workPerformed;
+
             this._physicsAccumulator -= tickMillis;
             ticks++;
 
-            // the tick ran out of budget with work outstanding - stop here and let
-            // the next frame carry on rather than blowing through the frame time
-            if (this._physics.budgetExceeded) {
+            elapsed = performance.now() - started;
+
+            // the tick ran out of budget with work outstanding, or the frame's
+            // time is spent - stop here and let the next frame carry on rather
+            // than blowing through the frame time
+            if (this._physics.budgetExceeded || elapsed >= PHYSICS_BUDGET_MS) {
                 break;
             }
+        }
+
+        // Re-estimate throughput from what that actually cost. Smoothed, and only
+        // from frames with enough work to be a meaningful sample - a handful of
+        // probes is dominated by the per-chunk sweep prologue and would drag the
+        // estimate well below the real rate.
+        //
+        // Clamped at the bottom, because the estimate feeds the allowance that
+        // produces the next sample: left free it can ratchet down, each small
+        // allowance yielding a small tick yielding a smaller estimate, and never
+        // climb back out on its own.
+        if (work > 20000 && elapsed > 0.5) {
+            const observed = work / elapsed;
+
+            this._workPerMs = Math.max(5000, this._workPerMs + ((observed - this._workPerMs) * 0.25));
         }
 
         // drop any remaining backlog so slow frames never spiral
@@ -843,7 +970,7 @@ export class VoxelEditor {
      */
     private _remeshLaneDirty(lane: MeshLane, dirty: ReadonlySet<number>): void {
         for (const key of dirty) {
-            this._requestMesh(lane, key);
+            this._queueMesh(lane, key);
         }
 
         if (this._renderMode !== "smooth" || lane.occluders.length === 0) {
@@ -882,7 +1009,7 @@ export class VoxelEditor {
         }
 
         for (const key of pending) {
-            this._requestMesh(lane, key);
+            this._queueMesh(lane, key);
         }
     }
 
@@ -977,7 +1104,7 @@ export class VoxelEditor {
             }
 
             for (const key of pending) {
-                this._requestMesh(lane, key);
+                this._queueMesh(lane, key);
             }
         }
     }
@@ -1242,6 +1369,8 @@ export class VoxelEditor {
             world: world,
             meshes: new Map<number, Mesh>(),
             triangles: new Map<number, number>(),
+            capacity: new Map<number, { vertices: number, indices: number }>(),
+            pending: new Set<number>(),
             inFlight: new Set<number>(),
             dirtyAgain: new Set<number>(),
             color: color,
@@ -1293,15 +1422,22 @@ export class VoxelEditor {
 
         for (const lane of this._lanes) {
             for (const mesh of lane.meshes.values()) {
-                this._shadows.removeShadowCaster(mesh);
+                this._shadows.removeShadowCaster(mesh, false);
                 mesh.dispose();
             }
 
             lane.meshes.clear();
             lane.triangles.clear();
+            lane.capacity.clear();
+            lane.pending.clear();
             lane.inFlight.clear();
             lane.dirtyAgain.clear();
         }
+
+        // Responses still in the apply queue belong to the world being replaced,
+        // and their lanes' mesh maps have just been emptied - applying them would
+        // resurrect meshes for chunks of a world that no longer exists.
+        this._readyResponses.length = 0;
 
         // the physics simulation holds a reference to the base world - recreate
         // it (which also clears all grains)
@@ -1326,7 +1462,7 @@ export class VoxelEditor {
             }
 
             for (const key of keys) {
-                this._requestMesh(lane, key);
+                this._queueMesh(lane, key);
             }
         }
 
@@ -1927,7 +2063,13 @@ export class VoxelEditor {
         }
 
         if (touched.size > 0 || physicsTouched) {
-            this._publishStats(true);
+            // Throttled, not forced. This runs once per pointermove for the whole
+            // length of a drag - about a hundred times a second - and a publish
+            // walks every base chunk pop-counting its BitVoxels. Forcing it made
+            // dragging the brush pay that walk on every event; the render loop
+            // flushes a dropped publish within 250 ms, which no one can see the
+            // difference of on a counter readout.
+            this._publishStats(false);
         }
     }
 
@@ -1961,7 +2103,7 @@ export class VoxelEditor {
         }
 
         for (const key of keys) {
-            this._requestMesh(this._baseLane, key);
+            this._queueMesh(this._baseLane, key);
         }
 
         // base occupancy occludes the sand and water lanes - remesh their
@@ -2124,7 +2266,7 @@ export class VoxelEditor {
         }
 
         for (const key of keys) {
-            this._requestMesh(this._baseLane, key);
+            this._queueMesh(this._baseLane, key);
         }
 
         // restored base occupancy occludes the sand and water lanes
@@ -2136,7 +2278,106 @@ export class VoxelEditor {
     // ---------------------------------------------------------------- meshing
 
     /**
-     * Queues a meshing request for a chunk of the provided lane. If a request
+     * Marks a chunk of the provided lane as wanting a remesh.
+     *
+     * This is deliberately nothing but a set insertion. Everything expensive -
+     * serializing the chunk's neighbourhood, serializing the occluding lanes'
+     * occupancy over it, posting to a worker - happens later, in _pumpMeshQueue,
+     * under a per-frame time budget.
+     *
+     * The distinction is what keeps a physics spike off the frame time. A
+     * collapsing water body dirties over a hundred chunks in a single tick;
+     * turning each one into a request there and then is more than twenty
+     * milliseconds of synchronous work between two frames, which is exactly the
+     * freeze this indirection removes.
+     */
+    private _queueMesh(lane: MeshLane, chunkKey: number): void {
+        lane.pending.add(chunkKey);
+    }
+
+    /**
+     * Spends this frame's meshing budget: turns queued chunks into worker
+     * requests, and applies whatever the workers have sent back.
+     *
+     * Both halves are budgeted, because both are unbounded in the amount of work
+     * a physics tick can hand them and both run on this thread. Requests cost
+     * serialization; responses cost building vertex data and replacing the
+     * mesh's GPU buffers. Whatever does not fit stays queued for the next frame,
+     * so a spike costs a chunk of terrain being a frame or two stale rather than
+     * a dropped frame - and on water, which is where the spikes are, one frame
+     * of staleness is invisible.
+     *
+     * Responses are applied before new requests are sent. A response is work
+     * already paid for by a worker and is holding a mesh in a stale state, so it
+     * is worth more than starting something new; sending first would also let
+     * the in-flight set grow while the apply queue backed up behind it.
+     */
+    private _pumpMeshQueue(): void {
+        const started = performance.now();
+
+        // ---- apply what came back
+
+        const ready = this._readyResponses;
+
+        while (ready.length > 0) {
+            if (performance.now() - started >= MESH_APPLY_BUDGET_MS) {
+                break;
+            }
+
+            const entry = ready.shift()!;
+
+            this._applyMeshResponse(entry.lane, entry.response);
+        }
+
+        // ---- send what is queued
+
+        const lanes = this._lanes;
+        const laneCount = lanes.length;
+
+        // Rotate which lane goes first each frame. Without this the base lane
+        // would take the whole budget for as long as it had work and the water
+        // lane - the one actually moving - would never be reached.
+        const offset = this._pumpCursor++ % laneCount;
+
+        let sent = 0;
+
+        for (let l = 0; l < laneCount; l++) {
+            const lane = lanes[(l + offset) % laneCount];
+
+            if (lane.pending.size === 0) {
+                continue;
+            }
+
+            // Iterated and deleted in place, no snapshot. Deleting the current
+            // entry of a Set under iteration is well defined, and nothing on this
+            // path inserts: in-flight chunks are skipped before _requestMesh is
+            // called, so its re-queue branch is unreachable from here. Copying
+            // instead would allocate an array the size of the whole queue every
+            // frame to service a dozen of its entries.
+            for (const chunkKey of lane.pending) {
+                if (performance.now() - started >= MESH_FRAME_BUDGET_MS) {
+                    return;
+                }
+
+                // still being meshed - leave it queued, the response handler
+                // will pick it up again
+                if (lane.inFlight.has(chunkKey)) {
+                    continue;
+                }
+
+                lane.pending.delete(chunkKey);
+                this._requestMesh(lane, chunkKey);
+                sent++;
+            }
+        }
+
+        if (sent > 0) {
+            this._statsDirty = true;
+        }
+    }
+
+    /**
+     * Sends a meshing request for a chunk of the provided lane. If a request
      * for the chunk is already in flight, the chunk is re-queued when the
      * response arrives.
      */
@@ -2182,9 +2423,14 @@ export class VoxelEditor {
 
         // flipped winding - BabylonJS treats clockwise faces as front-facing,
         // the opposite of the bvx-kit default counter-clockwise convention
+        // indices: false - the blocky and wireframe paths build their own index
+        // buffers, because they need per-face colours and baked occlusion that the
+        // static BVXGeometry vertex tables cannot carry. The mesher's own index
+        // buffer is dead weight there: over a hundred kilobytes per fluid chunk,
+        // allocated in the worker and transferred back only to be dropped.
         const request: MesherRequest = this._renderMode === "smooth"
             ? { id: 0, type: "smooth", chunkKey: chunkKey, smoothing: this._smoothing, flipped: true, world: snapshot }
-            : { id: 0, type: "faces", chunkKey: chunkKey, flipped: true, world: snapshot };
+            : { id: 0, type: "faces", chunkKey: chunkKey, flipped: true, world: snapshot, indices: false };
 
         if (occluderSnapshot !== null) {
             request.occluders = occluderSnapshot;
@@ -2314,12 +2560,29 @@ export class VoxelEditor {
     }
 
     /**
-     * Applies a meshing response to the chunk's renderable mesh.
+     * Takes delivery of a worker's meshing response.
+     *
+     * Building the vertex data and replacing the mesh's GPU buffers is as
+     * expensive as producing the request was, and responses arrive in bursts -
+     * four workers finishing a drain of a hundred chunks deliver a hundred
+     * promise callbacks with no frame boundary between them. So this only
+     * records the response; _pumpMeshQueue applies it under the frame's budget.
+     *
+     * The chunk leaves the in-flight set here rather than at apply time, so a
+     * chunk that changed again is free to be re-requested without waiting for
+     * its previous response to be drawn.
      */
     private _onMeshResponse(lane: MeshLane, response: MesherResponse): void {
-        const chunkKey = response.chunkKey;
+        lane.inFlight.delete(response.chunkKey);
 
-        lane.inFlight.delete(chunkKey);
+        this._readyResponses.push({ lane: lane, response: response });
+    }
+
+    /**
+     * Applies a meshing response to the chunk's renderable mesh.
+     */
+    private _applyMeshResponse(lane: MeshLane, response: MesherResponse): void {
+        const chunkKey = response.chunkKey;
 
         // the render mode changed while the request was in flight - the mode
         // switch already queued fresh requests, drop this stale response
@@ -2339,7 +2602,7 @@ export class VoxelEditor {
 
         // the chunk was edited again while the request was running
         if (lane.dirtyAgain.delete(chunkKey)) {
-            this._requestMesh(lane, chunkKey);
+            this._queueMesh(lane, chunkKey);
         }
 
         this._publishStats(false);
@@ -2359,6 +2622,13 @@ export class VoxelEditor {
     private _buildOcclusion(mortonKey: MortonKey, border: number): Uint8Array {
         const occupancy = this._occupancy;
 
+        // Cleared in full, not just the sub-box the blocky path's 1-cell border
+        // writes. Measured: one fill(0) over the whole 10,648-byte buffer is
+        // 0.125 us, because it is a single vectorised memset; clearing only the
+        // border-1 box means 324 short fill() calls and costs 5.5 us - 44 times
+        // worse. The narrower clear is also unsafe on the smooth path, whose
+        // _sampleOcclusionField clamps into cells this call never wrote and needs
+        // them zeroed rather than holding a previous chunk's occupancy.
         occupancy.fill(0);
 
         // Gather the 3x3x3 neighbourhood of BitVoxel storages for both worlds.
@@ -2485,7 +2755,6 @@ export class VoxelEditor {
         const positions = new Float32Array(faceCount * 4 * 3);
         const normals = new Float32Array(faceCount * 4 * 3);
         const colors = new Float32Array(faceCount * 4 * 4);
-        const occlusion = new Float32Array(faceCount * 4);
         const indices = new Uint32Array(faceCount * 6);
 
         // Baked corner ambient occlusion, from the union of the base world and
@@ -2494,6 +2763,14 @@ export class VoxelEditor {
         // water shader grows surf from - but at a quarter of the cost, see
         // below.
         const isWater = lane === this._waterLane;
+
+        // Water spends the measure on the vertex colour instead, so it needs no
+        // occlusion stream - and _uploadMesh would refuse to upload one for the
+        // water material anyway. Water is the lane a running simulation remeshes
+        // hardest, so an allocate-fill-discard of four floats per face there is
+        // the single most repeated piece of dead work in this path.
+        const occlusion = isWater ? null : new Float32Array(faceCount * 4);
+
         const occupancy = this._buildOcclusion(mortonKey, 1);
         const cornerAO: number[] = [3, 3, 3, 3];
 
@@ -2599,7 +2876,7 @@ export class VoxelEditor {
 
                     const openness = AO_LEVELS[cornerAO[c]];
 
-                    if (isWater) {
+                    if (occlusion === null) {
                         // water spends the same measure on surf, not shading
                         this._writeShore(colors, vertex, 1.0 - openness);
                     }
@@ -2613,9 +2890,9 @@ export class VoxelEditor {
                         colors[colorWrite + 1] = rgb[1];
                         colors[colorWrite + 2] = rgb[2];
                         colors[colorWrite + 3] = 1.0;
-                    }
 
-                    occlusion[vertex] = openness;
+                        occlusion[vertex] = openness;
+                    }
 
                     vertex++;
                 }
@@ -2675,17 +2952,15 @@ export class VoxelEditor {
         const positions = new Float32Array(faceCount * 4 * 3);
         const normals = new Float32Array(faceCount * 4 * 3);
         const colors = new Float32Array(faceCount * 4 * 4);
-        const occlusion = new Float32Array(faceCount * 4);
         const indices = new Uint32Array(faceCount * 8);
 
         // The line colour comes from the lane's emissive wire material, so the vertex
         // colours are left white - they exist only so a mesh reused from the blocky
-        // mode does not keep a stale colour buffer that would tint the lines. The
-        // occlusion stream is unused by the unlit wire material but must still match
-        // the vertex count, or a mesh reused from another mode keeps a buffer of the
-        // wrong length.
+        // mode does not keep a stale colour buffer that would tint the lines. No
+        // occlusion stream: the unlit wire material never samples one, and
+        // _uploadMesh drops the buffer outright in this mode rather than uploading
+        // a length-matched dummy.
         colors.fill(1.0);
-        occlusion.fill(1.0);
 
         let vertex = 0;
         let indexCount = 0;
@@ -2739,7 +3014,7 @@ export class VoxelEditor {
             }
         }
 
-        this._uploadMesh(lane, chunkKey, mortonKey, positions, normals, colors, occlusion, indices, faceCount * 2);
+        this._uploadMesh(lane, chunkKey, mortonKey, positions, normals, colors, null, indices, faceCount * 2);
     }
 
     /**
@@ -3005,7 +3280,7 @@ export class VoxelEditor {
     /**
      * Creates or updates the renderable mesh for a chunk of the provided lane.
      */
-    private _uploadMesh(lane: MeshLane, chunkKey: number, mortonKey: MortonKey, positions: Float32Array, normals: Float32Array, colors: Float32Array, occlusion: Float32Array, indices: Uint32Array, triangles: number): void {
+    private _uploadMesh(lane: MeshLane, chunkKey: number, mortonKey: MortonKey, positions: Float32Array, normals: Float32Array, colors: Float32Array, occlusion: Float32Array | null, indices: Uint32Array, triangles: number): void {
         const wire = this._renderMode === "wireframe";
 
         let mesh = lane.meshes.get(chunkKey);
@@ -3018,11 +3293,14 @@ export class VoxelEditor {
             // a mesh created while in wireframe mode joins no shadow map; the
             // mode switch rebuilds the caster list wholesale either way
             if (!wire && lane !== this._waterLane) {
-                this._shadows.addShadowCaster(mesh);
+                this._shadows.addShadowCaster(mesh, false);
             }
 
             lane.meshes.set(chunkKey, mesh);
         }
+
+        // a mesh emptied by _disposeOrClear and refilled here comes back visible
+        mesh.isVisible = true;
 
         // meshes survive a render-mode switch, so the material is reassigned on
         // every upload rather than only at creation
@@ -3031,29 +3309,118 @@ export class VoxelEditor {
 
         mesh.position.set(mortonKey.x * 16 * BIT_VOXEL_SIZE, mortonKey.y * 16 * BIT_VOXEL_SIZE, mortonKey.z * 16 * BIT_VOXEL_SIZE);
 
-        const data = new VertexData();
+        // Only the materials that actually read the baked occlusion get it. The
+        // water shader takes its shoreline from the vertex colour and the
+        // wireframe material is unlit, so uploading a whole extra vertex buffer
+        // for them is a GPU allocation per chunk per remesh that nothing ever
+        // samples - and water is the lane a running simulation remeshes hardest.
+        const wantsOcclusion = occlusion !== null && !wire && lane !== this._waterLane;
 
-        data.positions = positions;
-        data.normals = normals;
-        data.colors = colors;
-        data.indices = indices;
+        const vertexCount = positions.length / 3;
+        const stored = lane.capacity.get(chunkKey);
 
-        data.applyToMesh(mesh, true);
+        // Reuse the buffers already on the mesh when the new geometry fits them
+        // and the attribute set has not changed. This is the path that matters:
+        // setVerticesData always allocates a fresh VertexBuffer and frees the old
+        // one, so without it every remesh of every chunk churns its whole set of
+        // device buffers, and a simulation remeshes tens of chunks a frame.
+        const reusable = stored !== undefined
+            && mesh.geometry !== null
+            && vertexCount <= stored.vertices
+            && indices.length <= stored.indices
+            && wantsOcclusion === mesh.isVerticesDataPresent(BVX_AO_KIND);
 
-        // VertexData only understands Babylon's own vertex kinds, so the baked
-        // occlusion stream is attached separately - after applyToMesh, which
-        // rebuilds the geometry whenever the vertex count changes.
-        //
-        // Only the materials that actually read it get it. The water shader
-        // takes its shoreline from the vertex colour and the wireframe material
-        // is unlit, so uploading a whole extra vertex buffer for them is a GPU
-        // allocation per chunk per remesh that nothing ever samples - and water
-        // is the lane a running simulation remeshes hardest.
-        if (!wire && lane !== this._waterLane) {
-            mesh.setVerticesData(BVX_AO_KIND, occlusion, true, 1);
+        if (reusable) {
+            // updateExtends false throughout: it would recompute the bounds from
+            // the buffer's full capacity rather than the live vertices, reading
+            // the unwritten tail as a run of zeroes and dragging every chunk's
+            // box back to its local origin. They are set explicitly below.
+            mesh.updateVerticesData(VertexBuffer.PositionKind, positions, false);
+            mesh.updateVerticesData(VertexBuffer.NormalKind, normals, false);
+            mesh.updateVerticesData(VertexBuffer.ColorKind, colors, false);
+
+            if (wantsOcclusion) {
+                mesh.updateVerticesData(BVX_AO_KIND, occlusion!, false);
+            }
+
+            // Babylon tracks the geometry's vertex count separately from the
+            // buffers, and updateVerticesData does not revise it - it was set when
+            // the buffers were created, to their padded capacity. Left alone it
+            // disagrees with the data now in them, and everything that sizes a read
+            // from it (getVerticesData, refreshBoundingInfo, the SubMesh rebuild
+            // just below) then runs off the end of the live vertices. The draw
+            // itself is index-driven and would not notice, which is exactly what
+            // makes this worth correcting rather than leaving latent.
+            const geometry = mesh.geometry!;
+
+            // Written through a cast because Babylon exposes no setter for it.
+            // The public route, setVerticesBuffer(buffer, totalVertices), takes the
+            // count but also re-derives the bounding extent from the padded buffer
+            // and walks every mesh sharing the geometry resetting caches - all of
+            // which this path either does itself or does not want.
+            (geometry as unknown as { _totalVertices: number })._totalVertices = vertexCount;
+
+            // Geometry.updateIndices writes into the existing index buffer and,
+            // when the count changed, rebuilds the mesh's global SubMesh from the
+            // new length - which is what keeps the draw from running off the end
+            // of the live geometry into the slack. It reads the vertex count set
+            // above, so that assignment has to come first.
+            geometry.updateIndices(indices, 0, false);
+
+            this._setChunkBounds(mesh, positions, vertexCount);
         }
-        else if (mesh.isVerticesDataPresent(BVX_AO_KIND)) {
-            mesh.removeVerticesData(BVX_AO_KIND);
+        else {
+            // Grow with slack, so a chunk whose face count drifts up and down -
+            // which is every chunk a fluid passes through - stops reallocating
+            // after the first couple of remeshes.
+            const capacity = {
+                vertices: Math.max(64, Math.ceil(vertexCount * 1.5)),
+                indices: Math.max(96, Math.ceil(indices.length * 1.5))
+            };
+
+            const data = new VertexData();
+
+            data.positions = this._padded(positions, capacity.vertices * 3);
+            data.normals = this._padded(normals, capacity.vertices * 3);
+            data.colors = this._padded(colors, capacity.vertices * 4);
+
+            // Index padding repeats index 0 rather than being left at zero for a
+            // different reason than the vertex streams: these are degenerate
+            // triangles the SubMesh excludes anyway, and 0 is guaranteed to be a
+            // vertex that exists.
+            data.indices = this._paddedIndices(indices, capacity.indices);
+
+            data.applyToMesh(mesh, true);
+
+            // VertexData only understands Babylon's own vertex kinds, so the
+            // occlusion stream is attached separately - after applyToMesh, which
+            // rebuilds the geometry whenever the vertex count changes.
+            if (wantsOcclusion) {
+                mesh.setVerticesData(BVX_AO_KIND, this._padded(occlusion!, capacity.vertices), true, 1);
+            }
+            else if (mesh.isVerticesDataPresent(BVX_AO_KIND)) {
+                mesh.removeVerticesData(BVX_AO_KIND);
+            }
+
+            // The padding is slack, not geometry. applyToMesh took the geometry's
+            // vertex count from the padded buffers, so correct it to the live
+            // count for the same reason the reuse path does, then bring the
+            // SubMesh back to the live counts and set the bounds from the live
+            // vertices.
+            (mesh.geometry as unknown as { _totalVertices: number })._totalVertices = vertexCount;
+
+            const sub = mesh.subMeshes.length > 0 ? mesh.subMeshes[0] : null;
+
+            if (sub !== null) {
+                sub.indexStart = 0;
+                sub.indexCount = indices.length;
+                sub.verticesStart = 0;
+                sub.verticesCount = vertexCount;
+            }
+
+            this._setChunkBounds(mesh, positions, vertexCount);
+
+            lane.capacity.set(chunkKey, capacity);
         }
 
         // A chunk never moves once placed, so its world matrix is computed here
@@ -3080,15 +3447,114 @@ export class VoxelEditor {
     }
 
     /**
-     * Disposes the mesh of a chunk that no longer has visible geometry.
+     * Copies the provided data into a buffer of exactly `length`, leaving the
+     * tail at zero. Used to size a chunk's vertex streams past the geometry in
+     * them so later remeshes can write in place.
+     */
+    private _padded(data: Float32Array, length: number): Float32Array {
+        if (data.length === length) {
+            return data;
+        }
+
+        const out = new Float32Array(length);
+
+        out.set(data);
+
+        return out;
+    }
+
+    /**
+     * As _padded, for an index buffer - the tail repeats index 0 so every value
+     * in the buffer addresses a vertex that exists, even though the SubMesh
+     * excludes the padding from the draw.
+     */
+    private _paddedIndices(indices: Uint32Array, length: number): Uint32Array {
+        if (indices.length === length) {
+            return indices;
+        }
+
+        const out = new Uint32Array(length);
+
+        out.set(indices);
+
+        return out;
+    }
+
+    /**
+     * Sets a chunk mesh's local bounding box from its live vertices.
+     *
+     * Needed because the vertex buffers are larger than the geometry in them, so
+     * Babylon's own extent pass - which reads the buffer's full capacity - would
+     * fold the unwritten tail's zeroes into the box and pull it back toward the
+     * chunk's local origin. An over-large box costs culling accuracy; a box
+     * anchored at the origin makes chunks vanish at camera angles that put that
+     * corner off screen, which is the failure the frozen world matrix below was
+     * already written to avoid.
+     */
+    private _setChunkBounds(mesh: Mesh, positions: Float32Array, vertexCount: number): void {
+        let minX = Infinity, minY = Infinity, minZ = Infinity;
+        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+
+        const limit = vertexCount * 3;
+
+        for (let i = 0; i < limit; i += 3) {
+            const x = positions[i];
+            const y = positions[i + 1];
+            const z = positions[i + 2];
+
+            if (x < minX) { minX = x; }
+            if (x > maxX) { maxX = x; }
+            if (y < minY) { minY = y; }
+            if (y > maxY) { maxY = y; }
+            if (z < minZ) { minZ = z; }
+            if (z > maxZ) { maxZ = z; }
+        }
+
+        if (minX > maxX) {
+            return;
+        }
+
+        const min = this._boundsMin.set(minX, minY, minZ);
+        const max = this._boundsMax.set(maxX, maxY, maxZ);
+
+        mesh.getBoundingInfo().reConstruct(min, max);
+    }
+
+    /**
+     * Retires the mesh of a chunk that no longer has visible geometry.
+     *
+     * Hidden and emptied rather than disposed, and kept in the lane's map. A
+     * chunk losing its geometry is not a rare event during a simulation - a
+     * water body draining empties chunks at the same rate it fills others - and
+     * disposal is where that gets expensive. Every dispose is four linear scans
+     * over lists that are now region-sized: the shadow map's caster list twice
+     * (once from removeShadowCaster, once from dispose's own walk of the scene's
+     * lights), then scene.meshes and scene.rootNodes. Creating the replacement
+     * pays another. For water-lane meshes, which are never casters at all, the
+     * caster scans walk the entire list to find nothing.
+     *
+     * Keeping the mesh costs one entry in each of those lists and an empty draw
+     * that culls immediately, and the next _uploadMesh refills it in place.
      */
     private _disposeOrClear(lane: MeshLane, chunkKey: number): void {
         const mesh = lane.meshes.get(chunkKey);
 
         if (mesh) {
-            this._shadows.removeShadowCaster(mesh);
-            mesh.dispose();
-            lane.meshes.delete(chunkKey);
+            // Hidden, and nothing else. Not disposed, and its geometry not
+            // released either, because both of those churn DrawWrappers - and a
+            // DrawWrapper disposal decrements the refcount of the per-pass effect
+            // it held. A lane that momentarily empties in full, which is exactly
+            // what a water body does when a tunnel drains it, can take that
+            // refcount to zero and throw the compiled pipelines away; the next
+            // chunk to refill then blocks the frame recompiling them. That is a
+            // hundreds-of-milliseconds stall, and the only mechanism in this
+            // renderer capable of one.
+            //
+            // The cost of holding on is the vertex buffers of whatever the chunk
+            // last contained, for a mesh count bounded by the region. That is a
+            // trade worth making, and the buffers are what the chunk will be
+            // refilled into anyway.
+            mesh.isVisible = false;
         }
 
         lane.triangles.delete(chunkKey);
@@ -3185,8 +3651,8 @@ export class VoxelEditor {
             bitVoxels: bitVoxels,
             triangles: triangles,
             workers: this._pool.size,
-            sandGrains: this._sand.length,
-            waterGrains: this._water.length,
+            sandGrains: this._sand.grainCount,
+            waterGrains: this._water.grainCount,
             activeGrains: this._sand.activeCount + this._water.activeCount,
             fps: this._engine.getFps(),
             cpuFrameTime: this._cpuFrameTime

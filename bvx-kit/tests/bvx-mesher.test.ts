@@ -117,6 +117,38 @@ describe('BVXMesher', () => {
         }
     });
 
+    it('.process() - indices: false skips the triangle indices but keeps the masks', () => {
+        const { world, chunk } = buildWorld();
+        const mesher = new BVXMesher();
+
+        const base: MesherRequest = {
+            id: 1,
+            type: "faces",
+            chunkKey: chunk.key.key,
+            flipped: false,
+            world: BVXSerializer.saveWorld(world)
+        };
+
+        const withIndices = mesher.process(base);
+        const without = mesher.process({ ...base, indices: false, world: BVXSerializer.saveWorld(world) });
+
+        if (withIndices.type !== "faces" || without.type !== "faces") {
+            throw new Error("expected faces responses");
+        }
+
+        // the opted-out response carries no indices at all
+        expect(withIndices.indices.length).toBeGreaterThan(0);
+        expect(without.indices.length).toEqual(0);
+
+        // everything a renderer building its own index buffer needs is unchanged
+        expect(without.faceCount).toEqual(withIndices.faceCount);
+        expect(Array.from(without.touched)).toEqual(Array.from(withIndices.touched));
+        expect(Array.from(without.faceMasks)).toEqual(Array.from(withIndices.faceMasks));
+
+        // and the empty buffer is not offered up for transfer
+        expect(BVXMesher.transferables(without).length).toEqual(2);
+    });
+
     it('.transferables() - collects the response buffers', () => {
         const { world, chunk } = buildWorld();
         const mesher = new BVXMesher();
