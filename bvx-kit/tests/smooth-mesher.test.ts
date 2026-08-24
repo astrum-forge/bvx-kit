@@ -15,8 +15,7 @@ import { VoxelWorld } from "../src/lib/engine/voxel-world.js";
  *
  * GpuSmoothMesher itself cannot be exercised here - jest has no WebGPU - so what is
  * tested is everything about it that is decidable without one: the dispatch schedule and
- * the shader source. The device-backed verification lives in `bench/gpu-smooth`, which
- * diffs the kernel against this same CPU reference in a browser.
+ * the shader source.
  */
 describe('SmoothMesher', () => {
 

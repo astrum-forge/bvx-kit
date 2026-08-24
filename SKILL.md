@@ -9,8 +9,7 @@ license: Apache-2.0
 bvx-kit is a renderer-agnostic BitVoxel engine (ESM-only TypeScript, Node >= 20).
 Everything is imported from the package root: `import { ... } from '@astrum-forge/bvx-kit'`.
 This file covers the core API and the rules that keep it fast and correct. `README.md`
-(shipped in this package) covers the concepts in prose; `MIGRATION.md` covers the
-1.x to 2.0 changes.
+(shipped in this package) covers the concepts in prose.
 
 ## Mental model - read this first
 

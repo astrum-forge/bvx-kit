@@ -57,8 +57,7 @@ npm install @astrum-forge/bvx-kit
 A `GITHUB_TOKEN` with `read:packages` is enough. In GitHub Actions the built-in
 `secrets.GITHUB_TOKEN` works as-is.
 
-> Upgrading from 1.x? The scope changed from `@astrumforge` to `@astrum-forge`, and 2.0
-> makes three breaking changes. See **[MIGRATION.md](MIGRATION.md)**.
+> Upgrading from 1.x? The scope changed from `@astrumforge` to `@astrum-forge`.
 
 ## AI Agent Skill
 

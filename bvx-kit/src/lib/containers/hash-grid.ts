@@ -17,9 +17,6 @@ import { Key } from "../math/key.js";
  * bucket count wants to stay modest - the empty bucket array and the per-bucket Map
  * overhead are paid whether or not the world is large, and a VoxelWorld holding only the
  * 27 chunks of a mesh request pays it for no benefit.
- *
- * Benchmarks are in bench/hash-grid; the analysis is in
- * .plans/hashgrid-experiment-report.md.
  */
 export class HashGrid<K extends Key, V> {
     /**

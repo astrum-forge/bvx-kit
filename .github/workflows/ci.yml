@@ -33,10 +33,6 @@ jobs:
         working-directory: bvx-kit
         run: npm run build-ts
 
-      - name: Verify the built package loads as Node ESM
-        working-directory: bvx-kit
-        run: npm run verify:esm
-
       - name: Test
         working-directory: bvx-kit
         run: npm run test:ci

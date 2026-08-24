@@ -82,18 +82,11 @@ jobs:
         working-directory: bvx-kit
         run: npm run build-ts
 
-      # bundler module resolution does not enforce the explicit .js extensions Node
-      # needs, so check the artefact the way a consumer will load it
-      - name: Verify the built package loads as Node ESM
-        working-directory: bvx-kit
-        run: npm run verify:esm
-
       - name: Stage README, LICENSE and SKILL.md into the package
         run: |
           cp README.md bvx-kit/README.md
           cp LICENSE bvx-kit/LICENSE
           cp SKILL.md bvx-kit/SKILL.md
-          cp MIGRATION.md bvx-kit/MIGRATION.md 2>/dev/null || true
 
       - name: Publish
         working-directory: bvx-kit

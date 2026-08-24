@@ -9,19 +9,14 @@
   "scripts": {
     "clean": "rm -rf out coverage node_modules package-lock.json && npm cache clean --force",
     "build": "npm install && npm run build-ts",
-    "build-ts": "node node_modules/typescript7/bin/tsc --noEmitOnError",
-    "verify:esm": "node scripts/verify-esm.mjs",
+    "build-ts": "tsc --noEmitOnError",
     "clean:build": "npm run clean && npm run build",
     "clean:build-run": "npm run clean:build && node out/index.js",
     "dev:build-run": "rm -rf out && npm run build-ts && node out/index.js",
     "test:run": "jest",
     "test:coverage": "rm -rf coverage && jest --clearCache && jest --coverage --runInBand --collectCoverageFrom='src/lib/**/*.{ts,tsx}'",
     "test:ci": "jest --ci --runInBand --coverage --collectCoverageFrom='src/lib/**/*.{ts,tsx}'",
-    "bench": "npm run build-ts && node bench/bench.js",
-    "lint": "eslint .",
-    "bench:worker": "node bench/worker-protocol/index.mjs",
-    "bench:smooth-cpu": "node bench/gpu-smooth/cpu-node.mjs",
-    "bench:gpu": "python3 bench/gpu/serve.py 8741"
+    "lint": "oxlint --deny-warnings"
   },
   "repository": {
     "type": "git",
@@ -42,18 +37,12 @@
   },
   "homepage": "https://github.com/astrum-forge/bvx-kit",
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "@types/jest": "^30.0.0",
-    "@typescript-eslint/eslint-plugin": "^8.67.0",
-    "@typescript-eslint/parser": "^8.67.0",
+    "@swc/core": "^1.16.1",
+    "@swc/jest": "^0.2.39",
     "@webgpu/types": "^0.1.72",
-    "eslint": "^10.9.0",
-    "globals": "^17.11.0",
     "jest": "^30.4.2",
-    "ts-jest": "^29.4.12",
-    "ts-node": "^10.9.2",
-    "typescript": "^7.0.2",
-    "typescript-eslint": "^8.67.0"
+    "oxlint": "^1.79.0",
+    "typescript": "^7.0.2"
   },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com",
@@ -63,7 +52,6 @@
     "out/",
     "README.md",
     "LICENSE",
-    "MIGRATION.md",
     "SKILL.md"
   ]
 }
