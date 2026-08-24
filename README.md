@@ -60,6 +60,21 @@ A `GITHUB_TOKEN` with `read:packages` is enough. In GitHub Actions the built-in
 > Upgrading from 1.x? The scope changed from `@astrumforge` to `@astrum-forge`, and 2.0
 > makes three breaking changes. See **[MIGRATION.md](MIGRATION.md)**.
 
+## AI Agent Skill
+
+The package ships **[SKILL.md](SKILL.md)**, an [Agent Skill](https://code.claude.com/docs/en/skills)
+that teaches AI coding agents the core API — coordinate spaces, editing, meshing, raycasting,
+physics, serialization and worker usage. To make it discoverable to Claude Code in a consuming
+project:
+
+```bash
+mkdir -p .claude/skills/bvx-kit
+cp node_modules/@astrum-forge/bvx-kit/SKILL.md .claude/skills/bvx-kit/SKILL.md
+```
+
+Agents without a skills mechanism can read it directly from
+`node_modules/@astrum-forge/bvx-kit/SKILL.md`.
+
 ## Quick Setup
 
 Here’s how you can quickly set up **BitVoxel Engine** and start managing voxel chunks within a voxel world:

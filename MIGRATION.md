@@ -294,7 +294,7 @@ Only relevant if you build the kit from source; the published package is unaffec
 
 | | 1.x | 2.0 |
 | --- | --- | --- |
-| typescript | 5.7 | **6.0** |
+| typescript | 5.7 | **7.0 native compiler, 6.0 API bridge** |
 | eslint / @eslint/js | 9 | **10** |
 | jest / @types/jest | 29 | **30** |
 | globals | 15 | **17** |
@@ -305,10 +305,16 @@ Only relevant if you build the kit from source; the published package is unaffec
 `@types/eslint__js` is gone because `@eslint/js` 10 ships its own types and nothing
 referenced the shim.
 
-**TypeScript is pinned to 6.x on purpose.** 7.0 is released, but the toolchain does not
-accept it yet: `typescript-eslint@8.67.0` declares `typescript >=4.8.4 <6.1.0` and
-`ts-jest@29.4.12` declares `>=4.3 <7`, and neither has a newer major. Bump TypeScript
-past 6.0 only once both do.
+**Two TypeScript installs, on purpose.** The kit compiles and type-checks with the
+native TypeScript 7 compiler, installed under the `typescript7` alias
+(`npm:typescript@^7.0.2`) and invoked by `npm run build-ts` through its explicit path,
+so everything the package publishes is built by 7.0. The `typescript` package itself
+stays at 6.0.x because 7.0 ships no JS compiler API - its main entry exports only a
+version stub - and the tools that consume that API do not accept 7 yet:
+`typescript-eslint@8.67.0` declares `typescript >=4.8.4 <6.1.0` and `ts-jest@29.4.12`
+declares `>=4.3 <7`, and neither has a newer major. Lint and tests therefore run on
+the 6.0 API. Once both tools accept 7, drop the 6.x bridge and the alias and let
+`typescript@^7` carry the single install.
 
 Two tsconfig changes came with TypeScript 6, which errors on what 5.x merely deprecated:
 
