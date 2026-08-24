@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A tag push also fires the push event above; the release workflow depends on
+# this one having passed, so keep the job name stable.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kit:
+    name: bvx-kit — build, test, lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: bvx-kit/package-lock.json
+
+      - name: Install
+        working-directory: bvx-kit
+        run: npm ci || npm install
+
+      - name: Type check
+        working-directory: bvx-kit
+        run: npm run build-ts
+
+      - name: Test
+        working-directory: bvx-kit
+        run: npm run test:ci
+
+      - name: Lint
+        working-directory: bvx-kit
+        run: npm run lint
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: bvx-kit/coverage
+          if-no-files-found: ignore
+
+  editor:
+    name: bvx-editor — type check and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # the editor consumes the kit through file:../bvx-kit, so the kit has to
+      # be compiled before the editor can resolve its types
+      - name: Build bvx-kit
+        working-directory: bvx-kit
+        run: |
+          npm install
+          npm run build-ts
+
+      - name: Build bvx-editor
+        working-directory: bvx-editor
+        run: |
+          npm install
+          npx tsc --noEmit
+          npx vite build --base=/bvx-kit/

@@ -1,6 +1,6 @@
-import { BVXMesher } from "@astrumforge/bvx-kit";
+import { BVXMesher } from "@astrum-forge/bvx-kit";
 import { expandQuads } from "./blocky-expand";
-import { blockyTransferables, type BlockyMeshRequest, type EditorMeshRequest, type EditorMeshResponse } from "./mesh-protocol";
+import { blockyTransferables, type BlockyMeshRequest, type BlockyMeshResponse, type EditorMeshRequest, type EditorMeshResponse } from "./mesh-protocol";
 
 /**
  * Worker entry point. All geometry generation the editor asks for runs here,
@@ -20,13 +20,11 @@ const mesher = new BVXMesher();
  * Handles a blocky request: face visibility and baked occlusion from the kit,
  * then expansion into vertex streams here.
  */
-function processBlocky(request: BlockyMeshRequest): EditorMeshResponse {
+function processBlocky(request: BlockyMeshRequest): BlockyMeshResponse {
     const packed = mesher.process({
         id: request.id,
         type: "quads",
-        chunkKey: request.chunkKey,
-        world: request.world,
-        occluders: request.occluders,
+        payload: request.payload,
 
         // Water needs only a coarse "how enclosed is this face" measure to grow
         // surf from, at a quarter of the sampling cost - and it must not count
@@ -36,7 +34,7 @@ function processBlocky(request: BlockyMeshRequest): EditorMeshResponse {
     });
 
     if (packed.type !== "quads") {
-        throw new Error("bvx: quads request returned a non-quads response");
+        throw new Error(`bvx: quads request returned '${packed.type}'` + (packed.type === "error" ? ` - ${packed.message}` : ""));
     }
 
     const mesh = expandQuads(packed.quads, packed.meta, request.laneColor, request.water);
@@ -44,7 +42,12 @@ function processBlocky(request: BlockyMeshRequest): EditorMeshResponse {
     return {
         id: request.id,
         type: "blocky",
-        chunkKey: request.chunkKey,
+        chunkKey: packed.chunkKey,
+
+        // the occupancy buffers came in with the request and go straight back, so the
+        // pool can hand them to the next one instead of allocating
+        recycle: packed.recycle,
+
         positions: mesh.positions,
         normals: mesh.normals,
         colors: mesh.colors,
@@ -57,15 +60,51 @@ function processBlocky(request: BlockyMeshRequest): EditorMeshResponse {
 self.onmessage = (event: MessageEvent<EditorMeshRequest>): void => {
     const request = event.data;
 
-    if (request.type === "blocky") {
-        const response = processBlocky(request);
+    // Never let an exception escape: a message handler that throws posts nothing, and
+    // the pool then waits on that id forever. Answer with the kit's error response
+    // instead, which the pool turns into a rejected promise.
+    try {
+        if (request.type === "blocky") {
+            const response = processBlocky(request);
 
-        (self as unknown as Worker).postMessage(response, response.type === "blocky" ? blockyTransferables(response) : []);
+            (self as unknown as Worker).postMessage(response, blockyTransferables(response));
 
-        return;
+            return;
+        }
+
+        const response: EditorMeshResponse = mesher.process(request);
+
+        (self as unknown as Worker).postMessage(response, BVXMesher.transferables(response));
     }
+    catch (error) {
+        // Derive the key defensively - a payload malformed enough to make process()
+        // throw can make chunkKeyOf() throw too, and an exception from inside this
+        // handler is the exact unanswered-promise hang the handler exists to prevent.
+        let chunkKey = 0;
 
-    const response = mesher.process(request);
+        try {
+            chunkKey = BVXMesher.chunkKeyOf(request.payload);
+        }
+        catch {
+            // keep 0 - the pool routes by request id, not by chunk key
+        }
 
-    (self as unknown as Worker).postMessage(response, BVXMesher.transferables(response));
+        // hand the request's occupancy buffers back even on failure, or the pool
+        // allocates replacements for every buffer an error strands in this worker
+        let recycle: Uint32Array[] | undefined;
+
+        if (request.payload?.kind === "neighbourhood") {
+            recycle = request.payload.occluders !== undefined
+                ? [request.payload.chunk.occupancy, request.payload.occluders.occupancy]
+                : [request.payload.chunk.occupancy];
+        }
+
+        (self as unknown as Worker).postMessage({
+            id: request.id,
+            type: "error",
+            chunkKey: chunkKey,
+            recycle: recycle,
+            message: error instanceof Error ? error.message : String(error)
+        }, recycle !== undefined ? recycle.map((view) => view.buffer as ArrayBuffer) : []);
+    }
 };

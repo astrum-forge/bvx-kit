@@ -1,3 +1,4 @@
+import { VoxelChunkArena } from "../chunks/voxel-chunk-arena.js";
 import { VoxelWorld } from "../voxel-world.js";
 import { VoxelPhysicsLayer, VoxelPhysicsParams } from "./voxel-physics-layer.js";
 
@@ -105,23 +106,16 @@ export class VoxelPhysics {
     private _tick = 0;
 
     /**
-     * Whether the most recent update() stopped on its move budget rather than
-     * running out of work.
+     * The index into the stepping order of the layer a budgeted call stopped part-way
+     * through, so the next call resumes the same tick there. -1 when no tick is open.
      */
-    private _budgetExceeded = false;
+    private _resumeLayer = -1;
 
     /**
      * The largest flowDistance across all registered flow layers, or 0 when no
      * layer flows. Determines how far lateral vacancy wakes must propagate.
      */
     private _maxFlowDistance = 0;
-
-    /**
-     * Whether lateral flow-line wakes are required this tick. Only true when a
-     * dormant flow-layer grain exists somewhere - with every flow grain awake
-     * (or none present), skipping the wake scans is exactly equivalent.
-     */
-    private _flowWakeNeeded = false;
 
     /**
      * Constructs a new physics simulation over the provided base world.
@@ -190,14 +184,12 @@ export class VoxelPhysics {
     }
 
     /**
-     * Returns whether the most recent update() stopped on its move budget with work
-     * still outstanding, rather than because everything that could move had moved.
-     *
-     * A caller running its own fixed-step accumulator can use this to decide whether
-     * to keep ticking - the simulation is behind, not settled.
+     * Returns whether a tick is part-way through, because a previous update() ran out
+     * of budget inside it. The next update() continues that tick before starting a new
+     * one, and tick does not advance until it completes.
      */
-    public get budgetExceeded(): boolean {
-        return this._budgetExceeded;
+    public get tickInProgress(): boolean {
+        return this._resumeLayer >= 0;
     }
 
     /**
@@ -209,31 +201,19 @@ export class VoxelPhysics {
     }
 
     /**
-     * Returns whether lateral flow-line wakes are required this tick. Used
-     * internally by the layer solvers.
-     */
-    public get flowWakeNeeded(): boolean {
-        return this._flowWakeNeeded;
-    }
-
-    /**
-     * Notifies the coordinator that a flow-layer grain settled this tick, which
-     * enables flow-line wakes for the remainder of the tick. Called internally
-     * by the layer solvers.
-     */
-    public notifyFlowSettled(): void {
-        this._flowWakeNeeded = true;
-    }
-
-    /**
      * Creates and registers a new simulation layer.
      *
      * @param params - (Optional) The layer behaviour (see VoxelPhysicsParams).
      * Use the VoxelPhysics.SAND and VoxelPhysics.WATER presets for common materials.
+     * @param arena - (Optional) An arena to allocate this layer's chunk occupancy from.
+     * Over a SharedArrayBuffer this is what lets a mesher in another agent read the
+     * layer's grains with no serialization - the runner posts slot indices and the
+     * worker binds views over the same memory. Read VoxelChunkArena's concurrency
+     * section first: the arena makes the memory reachable, not the access safe.
      * @returns - The new VoxelPhysicsLayer.
      */
-    public addLayer(params: VoxelPhysicsParams | null = null): VoxelPhysicsLayer {
-        const layer: VoxelPhysicsLayer = new VoxelPhysicsLayer(this, params);
+    public addLayer(params: VoxelPhysicsParams | null = null, arena: VoxelChunkArena | null = null): VoxelPhysicsLayer {
+        const layer: VoxelPhysicsLayer = new VoxelPhysicsLayer(this, params, arena);
 
         this._layers.push(layer);
 
@@ -250,111 +230,106 @@ export class VoxelPhysics {
     }
 
     /**
-     * Advances the simulation. Each step moves every active grain by at most
-     * one cell. Call this from the application's update loop - once per frame
-     * or on a fixed timestep. With no active grains the call is effectively free.
+     * Advances the simulation. Each tick moves every active grain by at most one cell.
+     * Call this from the application's update loop - once per frame or on a fixed
+     * timestep. With no active grains the call is effectively free.
      *
-     * A collapsing pile wakes a large region at once, so tick cost is spiky - peaks
-     * run around ten times the mean. Passing a move budget caps the work a single
-     * call performs: the sweep stops once the budget is spent, and the chunks it did
-     * not reach stay awake and are swept by the following call. The collapse then
-     * resolves over several ticks instead of one long one, which trades a little
-     * settling latency for a bounded cost per call.
+     * ## The budget paces the work; it does not change the simulation
      *
-     * Budgets are denominated in simulation quantities rather than milliseconds so
-     * that a given input produces the same simulation on every machine.
+     * A collapsing pile wakes a large region at once, so tick cost is spiky - peaks run
+     * around ten times the mean. `maxWork` caps what one call performs: the sweep stops
+     * once the budget is spent and *records where it stopped*, and the next call
+     * continues the same tick from there. The tick counter does not advance until the
+     * tick completes.
      *
-     * Prefer maxWork to maxMoves. Movements do not predict cost, because the
-     * expensive grains are the ones that do NOT move: a grain with nowhere to go
-     * still pays for every probe that discovered as much, and for a flowing layer
-     * that search is the most expensive thing the solver does. Measured on a
-     * collapsing lake, a tick doing 6,000 movements took 10.2 ms while one doing
-     * 21,620 took 32.8 ms - a cost-per-movement spread of well over two to one,
-     * which no movement budget can bound. maxWork counts cell probes, which is
-     * what the time is actually spent on, and is near-perfectly linear in it.
+     * This is the property that matters: for a given world, the sequence of grain
+     * movements is identical at every budget. A budget changes how many calls a tick
+     * takes, never what the tick computes. Check `complete` to know whether a tick is
+     * still open.
      *
-     * When a budget cuts a tick short, the layers that had not yet stepped are
-     * skipped for that tick, so cross-layer displacement resolves a tick later than
-     * it otherwise would. Check budgetExceeded to detect this. A work budget is
-     * shared out evenly between the layers still to step, so a dense layer cannot
-     * consume the whole allowance and starve a lighter one of its tick.
+     * The budget is denominated in cell probes rather than milliseconds so that a given
+     * input produces the same simulation on every machine, and rather than in grain
+     * movements because movements do not predict cost. Every cell the solver examines
+     * counts: occupancy probes and the cells its wake scans visit, which on a mixed
+     * collapse are over 40% of the real cost - a budget that skipped them could not
+     * bound a tick - the expensive grains are the
+     * ones that do NOT move. A grain with nowhere to go still pays for every probe that
+     * discovered as much, and for a flowing layer that search is the most expensive
+     * thing the solver does. Measured on a collapsing lake, a tick doing 6,000
+     * movements took 10.2 ms while one doing 21,620 took 32.8 ms - a spread no movement
+     * budget can bound. Probes are near-perfectly linear in time; convert a target frame
+     * time by measuring the local probes-per-millisecond once and multiplying.
      *
-     * @param steps - (Optional) The number of simulation ticks to advance. Defaults to 1.
-     * @param maxMoves - (Optional) Stop once this many grains have moved across the
-     * whole call. 0 or less means no limit, which is the default and the previous
-     * behaviour.
+     * @param ticks - (Optional) The number of simulation ticks to advance. Defaults to 1.
+     * A tick left open by a previous budgeted call is finished first and counts as one
+     * of them.
      * @param maxWork - (Optional) Stop once this many cell probes have been performed
-     * across the whole call. 0 or less means no limit. This is the budget that
-     * bounds a tick's cost; convert a target frame time by measuring the local
-     * probes-per-millisecond once and multiplying.
-     * @returns - The total number of grain movements performed.
+     * across the whole call. 0 or less means no limit, which is the default.
+     * @returns - What the call achieved (see PhysicsStepResult).
      */
-    public update(steps = 1, maxMoves = 0, maxWork = 0): number {
+    public update(ticks = 1, maxWork = 0): PhysicsStepResult {
         const stepOrder: VoxelPhysicsLayer[] = this._stepOrder;
-        const budgeted: boolean = maxMoves > 0;
-        const workBudgeted: boolean = maxWork > 0;
+        const budgeted: boolean = maxWork > 0;
 
         let moves = 0;
         let work = 0;
+        let completed = 0;
 
-        this._budgetExceeded = false;
-
-        for (let i = 0; i < steps; i++) {
+        for (let i = 0; i < ticks; i++) {
             const tick: number = this._tick;
 
-            // flow-line wakes are only needed while dormant flow grains exist -
-            // a flow grain settling mid-tick re-enables them via notifyFlowSettled()
-            this._flowWakeNeeded = false;
+            let interrupted = false;
 
-            for (let l = 0; l < stepOrder.length; l++) {
+            const from: number = this._resumeLayer < 0 ? 0 : this._resumeLayer;
+
+            for (let l = from; l < stepOrder.length; l++) {
                 const layer: VoxelPhysicsLayer = stepOrder[l];
 
-                if (layer.flow && layer.hasDormantGrains) {
-                    this._flowWakeNeeded = true;
+                // The whole remaining budget goes to each layer in turn. Splitting it
+                // between the layers still to step used to be necessary, back when a
+                // budget that ran out skipped them: the densest layer could spend
+                // everything and leave water - typically the one actually moving - with
+                // no tick at all. A resumable sweep removes that failure outright,
+                // because the tick is not finished until every layer has stepped, so
+                // splitting now only fragments calls that could have completed.
+                const remaining: number = budgeted ? Math.max(1, maxWork - work) : 0;
 
-                    break;
-                }
-            }
+                const finished: boolean = layer.step(tick, remaining);
 
-            for (let l = 0; l < stepOrder.length; l++) {
-                const layer: VoxelPhysicsLayer = stepOrder[l];
-
-                // Share the remaining work budget evenly with the layers still to
-                // step, rather than handing each the whole remainder. Layers step in
-                // density order, so the undivided remainder lets the densest layer
-                // spend everything and leave a lighter one - water, typically the one
-                // actually moving - with no tick at all. Recomputed each time, so a
-                // layer that comes in under its share passes the surplus on.
-                const share: number = workBudgeted
-                    ? Math.max(1, Math.ceil((maxWork - work) / (stepOrder.length - l)))
-                    : 0;
-
-                // moves are still handed the whole remainder, preserving the
-                // documented behaviour of the older budget
-                moves += layer.step(tick, budgeted ? maxMoves - moves : 0, share);
+                moves += layer.movesPerformed;
                 work += layer.workPerformed;
 
-                if (budgeted && moves >= maxMoves) {
-                    this._budgetExceeded = true;
+                if (!finished) {
+                    this._resumeLayer = l;
+                    interrupted = true;
 
                     break;
                 }
 
-                if (workBudgeted && work >= maxWork) {
-                    this._budgetExceeded = true;
+                if (budgeted && work >= maxWork && l + 1 < stepOrder.length) {
+                    // the budget is gone but this layer finished cleanly - resume the
+                    // same tick at the next layer
+                    this._resumeLayer = l + 1;
+                    interrupted = true;
 
                     break;
                 }
             }
 
-            this._tick++;
+            if (interrupted) {
+                return { ticks: completed, moves: moves, work: work, complete: false, tick: this._tick };
+            }
 
-            if (this._budgetExceeded) {
-                break;
+            this._resumeLayer = -1;
+            this._tick++;
+            completed++;
+
+            if (budgeted && work >= maxWork && i + 1 < ticks) {
+                return { ticks: completed, moves: moves, work: work, complete: false, tick: this._tick };
             }
         }
 
-        return moves;
+        return { ticks: completed, moves: moves, work: work, complete: true, tick: this._tick };
     }
 
     /**
@@ -392,4 +367,37 @@ export class VoxelPhysics {
             }
         }
     }
+}
+
+/**
+ * What an update() call achieved.
+ */
+export interface PhysicsStepResult {
+    /**
+     * How many ticks completed. A budgeted call that ran out part-way through a tick
+     * reports the ticks that did finish, not the one still open.
+     */
+    ticks: number;
+
+    /**
+     * How many grains moved.
+     */
+    moves: number;
+
+    /**
+     * How many cell probes were performed - the quantity maxWork budgets.
+     */
+    work: number;
+
+    /**
+     * Whether every requested tick finished. False means the budget ran out with a tick
+     * still open; the next update() continues it, and the simulation is behind rather
+     * than settled.
+     */
+    complete: boolean;
+
+    /**
+     * The simulation tick counter after the call.
+     */
+    tick: number;
 }

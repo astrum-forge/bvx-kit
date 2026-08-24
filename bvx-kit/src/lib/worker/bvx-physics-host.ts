@@ -85,9 +85,43 @@ export class BVXPhysicsHost {
         const runner: BVXPhysicsRunner = this._runner;
 
         scope.onmessage = (event: { data: PhysicsRequest }): void => {
-            const response: PhysicsResponse = runner.process(event.data);
+            const request: PhysicsRequest = event.data;
 
-            scope.postMessage(response, BVXPhysicsRunner.transferables(response));
+            // a message handler that throws posts nothing, and a caller waiting on the
+            // request id then waits forever - so every message gets an answer, however
+            // malformed. The realistic throws are a step or edit before attach, an
+            // inject naming a missing layer, and attach bytes that do not decode.
+            if (request === null || typeof request !== "object") {
+                scope.postMessage({ id: -1, type: "error", message: "BVXPhysicsHost - the message is not a PhysicsRequest" });
+
+                return;
+            }
+
+            let response: PhysicsResponse;
+
+            try {
+                response = runner.process(request);
+            }
+            catch (error) {
+                response = {
+                    id: request.id,
+                    type: "error",
+                    message: error instanceof Error ? error.message : String(error)
+                };
+            }
+
+            try {
+                scope.postMessage(response, BVXPhysicsRunner.transferables(response));
+            }
+            catch (error) {
+                // a response that cannot be posted - a detached buffer, a value the
+                // structured clone algorithm rejects - still owes the caller an answer
+                scope.postMessage({
+                    id: request.id,
+                    type: "error",
+                    message: `response could not be posted: ${error instanceof Error ? error.message : String(error)}`
+                });
+            }
         };
     }
 }

@@ -1,4 +1,4 @@
-import { VoxelQuadGeometry } from "@astrumforge/bvx-kit";
+import { VoxelQuadGeometry } from "@astrum-forge/bvx-kit";
 import { PALETTE } from "./palette";
 import { AO_LEVELS, BIT_VOXEL_SIZE } from "./units";
 

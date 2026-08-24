@@ -17,9 +17,6 @@ import { Key } from "../math/key.js";
  * bucket count wants to stay modest - the empty bucket array and the per-bucket Map
  * overhead are paid whether or not the world is large, and a VoxelWorld holding only the
  * 27 chunks of a mesh request pays it for no benefit.
- *
- * Benchmarks are in bench/hash-grid; the analysis is in
- * .plans/hashgrid-experiment-report.md.
  */
 export class HashGrid<K extends Key, V> {
     /**
@@ -181,6 +178,27 @@ export class HashGrid<K extends Key, V> {
                 yield* bucket.keys();
             }
         }
+    }
+
+    /**
+     * Removes every key-value pair, keeping the bucket array so a grid that is
+     * refilled every frame - the 27-chunk neighbourhood a mesh request binds, for
+     * instance - allocates nothing per refill. Buckets that were created stay
+     * created and are simply emptied.
+     */
+    public clear(): void {
+        const dict: (Map<number, V> | undefined)[] = this._dict;
+        const size: number = this._size;
+
+        for (let i = 0; i < size; i++) {
+            const bucket: Map<number, V> | undefined = dict[i];
+
+            if (bucket !== undefined && bucket.size !== 0) {
+                bucket.clear();
+            }
+        }
+
+        this._count = 0;
     }
 
     /**

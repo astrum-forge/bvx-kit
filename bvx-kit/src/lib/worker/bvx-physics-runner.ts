@@ -3,7 +3,7 @@ import { VoxelChunk } from "../engine/chunks/voxel-chunk.js";
 import { VoxelChunk0 } from "../engine/chunks/voxel-chunk-0.js";
 import { VoxelIndex } from "../engine/voxel-index.js";
 import { VoxelWorld } from "../engine/voxel-world.js";
-import { VoxelPhysics, VoxelPhysicsOptions } from "../engine/physics/voxel-physics.js";
+import { VoxelPhysics, VoxelPhysicsOptions, PhysicsStepResult } from "../engine/physics/voxel-physics.js";
 import { VoxelPhysicsLayer, VoxelPhysicsParams } from "../engine/physics/voxel-physics-layer.js";
 import { BVXSerializer } from "../serialize/bvx-serializer.js";
 
@@ -123,13 +123,16 @@ export interface PhysicsStepRequest {
     /**
      * (Optional) The number of simulation ticks to advance. Defaults to 1.
      */
-    steps?: number;
+    ticks?: number;
 
     /**
-     * (Optional) Move budget for the whole call (see VoxelPhysics.update). 0 or less
-     * means no limit.
+     * (Optional) Cell-probe budget for the whole call (see VoxelPhysics.update). 0 or
+     * less means no limit.
+     *
+     * A budget paces the call; it does not change the simulation. A tick the budget
+     * cuts short is resumed by the next step request, not skipped.
      */
-    maxMoves?: number;
+    maxWork?: number;
 }
 
 /**
@@ -188,9 +191,21 @@ export interface PhysicsStepResponse {
     moves: number;
 
     /**
-     * Whether the call stopped on its move budget with work outstanding.
+     * The number of cell probes performed - the quantity maxWork budgets. Divide a
+     * measured wall-clock time by this to calibrate a probes-per-millisecond rate.
      */
-    budgetExceeded: boolean;
+    work: number;
+
+    /**
+     * How many ticks completed.
+     */
+    ticks: number;
+
+    /**
+     * Whether every requested tick finished. False means the budget ran out with a tick
+     * still open, which the next step request resumes.
+     */
+    complete: boolean;
 
     /**
      * Per-layer changes since the previous step response.
@@ -219,9 +234,36 @@ export interface PhysicsAckResponse {
 }
 
 /**
+ * A request the runner could not process.
+ *
+ * A response rather than a thrown exception, for the same reason the mesher gives one:
+ * an exception escaping a worker's message handler posts nothing, and a caller waiting
+ * on the request id then waits forever. The realistic ways to get one are a step or
+ * edit arriving before attach, an inject naming a layer that does not exist, and an
+ * attach whose world bytes do not decode.
+ */
+export interface PhysicsErrorResponse {
+    /**
+     * The identifier of the originating request, or -1 when the request was too
+     * malformed to carry one.
+     */
+    id: number;
+
+    /**
+     * The type of response.
+     */
+    type: "error";
+
+    /**
+     * What went wrong.
+     */
+    message: string;
+}
+
+/**
  * Union of all physics runner response types.
  */
-export type PhysicsResponse = PhysicsStepResponse | PhysicsAckResponse;
+export type PhysicsResponse = PhysicsStepResponse | PhysicsAckResponse | PhysicsErrorResponse;
 
 /**
  * BVXPhysicsRunner owns a VoxelPhysics simulation and drives it from messages. It is
@@ -495,7 +537,7 @@ export class BVXPhysicsRunner {
      * Advances the simulation and encodes what changed.
      */
     private _Step(physics: VoxelPhysics, request: PhysicsStepRequest): PhysicsStepResponse {
-        const moves: number = physics.update(request.steps ?? 1, request.maxMoves ?? 0);
+        const result: PhysicsStepResult = physics.update(request.ticks ?? 1, request.maxWork ?? 0);
         const layers: PhysicsLayerDelta[] = [];
 
         for (let i = 0; i < this._layers.length; i++) {
@@ -505,9 +547,11 @@ export class BVXPhysicsRunner {
         return {
             id: request.id,
             type: "step",
-            tick: physics.tick,
-            moves,
-            budgetExceeded: physics.budgetExceeded,
+            tick: result.tick,
+            moves: result.moves,
+            work: result.work,
+            ticks: result.ticks,
+            complete: result.complete,
             layers
         };
     }

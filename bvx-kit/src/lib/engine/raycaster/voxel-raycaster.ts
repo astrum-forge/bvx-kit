@@ -36,6 +36,13 @@ export class VoxelRaycaster {
      * @param optres - (Optional) A pre-allocated WorldIndex object to store the result, reducing allocations.
      * 
      * @returns - Returns the WorldIndex of the first voxel hit by the ray if a voxel is found, otherwise returns null.
+     
+     * NOTE: Coordinates wrap at the edge of the addressable MortonKey space (1024
+     * chunks per axis). A ray that leaves the world does not stop - it keeps
+     * traversing on the wrapped side and can return a hit from there. Callers
+     * tracing long or unbounded rays should clamp the segment to their own world
+     * bounds first. Traversal cost is proportional to the segment length in
+     * BitVoxels, including through empty space.
      */
     public raycast(ray: VoxelRay, optres: WorldIndex | null = null): WorldIndex | null {
         const cellSize = 1; // Each voxel is treated as a 1x1x1 cell

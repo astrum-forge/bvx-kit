@@ -220,6 +220,156 @@ describe('VoxelChunkArena', () => {
             expect(chunk.layer.bitArray.buffer).toBe(shared);
         }
     });
+
+    it('.release() - refuses to hand the same slot out twice', () => {
+        const arena = new VoxelChunkArena(4, 0);
+        const slot = arena.allocate();
+
+        expect(arena.isAllocated(slot)).toEqual(true);
+        expect(arena.length).toEqual(1);
+
+        arena.release(slot);
+
+        expect(arena.isAllocated(slot)).toEqual(false);
+        expect(arena.length).toEqual(0);
+
+        // A second release would push a duplicate onto the free list, and the arena
+        // would then hand the same memory to two chunks that silently alias.
+        expect(() => arena.release(slot)).toThrow(/not allocated/);
+        expect(() => arena.release(-1)).toThrow(RangeError);
+        expect(() => arena.release(4)).toThrow(RangeError);
+
+        // the free list still holds exactly one entry
+        expect(arena.allocate()).toEqual(slot);
+        expect(arena.allocate()).not.toEqual(slot);
+    });
+
+    it('.isAllocated() - reports out-of-range slots as unallocated rather than throwing', () => {
+        const arena = new VoxelChunkArena(2, 0);
+
+        expect(arena.isAllocated(-1)).toEqual(false);
+        expect(arena.isAllocated(2)).toEqual(false);
+    });
+
+    it('.clear() - zeroes a recycled slot through a 32-bit view', () => {
+        // Tear-freedom under a concurrent read holds only while both sides use views of
+        // the same width, and every other access to occupancy is 32-bit.
+        const arena = new VoxelChunkArena(2, VoxelChunk32.META_BYTE_LENGTH);
+        const chunk = arena.build(0, (storage) => new VoxelChunk32(MortonKey.from(0, 0, 0), storage));
+
+        chunk.layer.bitArray.elements.fill(0xFFFFFFFF);
+        chunk.setMetaData(VoxelIndex.from(1, 1, 1), 0xDEADBEEF);
+
+        arena.clear(0);
+
+        expect(chunk.layer.bitArray.elements.every((word) => word === 0)).toEqual(true);
+        expect(chunk.getMetaData(VoxelIndex.from(1, 1, 1))).toEqual(0);
+    });
+
+    it('.byteLengthFor() - a versioned arena reserves a counter per slot', () => {
+        expect(VoxelChunkArena.byteLengthFor(4, 0, false)).toEqual(4 * BVXLayer.BYTE_LENGTH);
+        expect(VoxelChunkArena.byteLengthFor(4, 0, true)).toEqual((4 * 4) + (4 * BVXLayer.BYTE_LENGTH));
+    });
+
+    it('.beginWrite() .endWrite() - version parity marks a write in progress', () => {
+        const arena = new VoxelChunkArena(2, 0, null, true);
+
+        expect(arena.isVersioned).toEqual(true);
+        expect(arena.version(0)).toEqual(0);
+
+        arena.beginWrite(0);
+
+        expect(arena.version(0) & 1).toEqual(1);
+
+        arena.endWrite(0);
+
+        expect(arena.version(0)).toEqual(2);
+        expect(arena.version(1)).toEqual(0);
+    });
+
+    it('.readStable() - returns a read that was not disturbed', () => {
+        const arena = new VoxelChunkArena(2, 0, null, true);
+        const chunk = arena.build(0, (storage) => new VoxelChunk0(MortonKey.from(0, 0, 0), storage));
+
+        arena.beginWrite(0);
+        chunk.layer.bitArray.elements[0] = 0xABCD;
+        arena.endWrite(0);
+
+        expect(arena.readStable(0, () => chunk.layer.bitArray.elements[0])).toEqual(0xABCD);
+    });
+
+    it('.readStable() - gives up rather than looping when a write never closes', () => {
+        const arena = new VoxelChunkArena(2, 0, null, true);
+
+        // an unbalanced beginWrite leaves the slot permanently odd, which is what a
+        // writer that crashed mid-update would look like to a reader
+        arena.beginWrite(0);
+
+        let attempts = 0;
+
+        const result = arena.readStable(0, () => {
+            attempts++;
+
+            return 1;
+        }, 4);
+
+        expect(result).toBeNull();
+        expect(attempts).toEqual(0);
+    });
+
+    it('.readStable() - discards a read a concurrent write ran through', () => {
+        const arena = new VoxelChunkArena(2, 0, null, true);
+
+        let calls = 0;
+
+        // the read itself opens and closes a write, modelling a writer landing mid-read
+        const result = arena.readStable(0, () => {
+            calls++;
+
+            if (calls === 1) {
+                arena.beginWrite(0);
+                arena.endWrite(0);
+            }
+
+            return calls;
+        }, 4);
+
+        // the first attempt was thrown away and the second one stood
+        expect(calls).toEqual(2);
+        expect(result).toEqual(2);
+    });
+
+    it('- the version operations refuse an arena with no version region', () => {
+        const arena = new VoxelChunkArena(2, 0);
+
+        expect(arena.isVersioned).toEqual(false);
+        expect(() => arena.version(0)).toThrow(/not versioned/);
+        expect(() => arena.beginWrite(0)).toThrow(/not versioned/);
+        expect(() => arena.endWrite(0)).toThrow(/not versioned/);
+        expect(() => arena.readStable(0, () => 1)).toThrow(/not versioned/);
+    });
+
+    it('- a versioned arena still lays its chunk slots out without overlap', () => {
+        const arena = new VoxelChunkArena(3, VoxelChunk16.META_BYTE_LENGTH, null, true);
+
+        const chunks = [0, 1, 2].map((slot) =>
+            arena.build(slot, (storage) => new VoxelChunk16(MortonKey.from(slot, 0, 0), storage)));
+
+        chunks[1].layer.bitArray.elements.fill(0xFFFFFFFF);
+        chunks[1].setMetaData(VoxelIndex.from(0, 0, 0), 0xBEEF);
+
+        expect(chunks[0].isEmpty).toEqual(true);
+        expect(chunks[2].isEmpty).toEqual(true);
+        expect(chunks[0].getMetaData(VoxelIndex.from(0, 0, 0))).toEqual(0);
+        expect(chunks[2].getMetaData(VoxelIndex.from(0, 0, 0))).toEqual(0);
+        expect(chunks[1].isFull).toEqual(true);
+
+        // and the version counters live below the occupancy region, untouched by it
+        expect(arena.version(0)).toEqual(0);
+        expect(arena.version(1)).toEqual(0);
+        expect(arena.version(2)).toEqual(0);
+    });
+
 });
 
 /**

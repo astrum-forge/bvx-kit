@@ -1,6 +1,6 @@
 {
-  "name": "@astrumforge/bvx-kit",
-  "version": "0.0.1",
+  "name": "@astrum-forge/bvx-kit",
+  "version": "2.0.0",
   "description": "Generic & Renderer Agnostic BitVoxel Engine Implementation in TypeScript",
   "main": "out/index.js",
   "module": "out/index.js",
@@ -16,8 +16,7 @@
     "test:run": "jest",
     "test:coverage": "rm -rf coverage && jest --clearCache && jest --coverage --runInBand --collectCoverageFrom='src/lib/**/*.{ts,tsx}'",
     "test:ci": "jest --ci --runInBand --coverage --collectCoverageFrom='src/lib/**/*.{ts,tsx}'",
-    "bench": "npm run build-ts && node bench/bench.js",
-    "lint": "npx eslint ."
+    "lint": "oxlint --deny-warnings"
   },
   "repository": {
     "type": "git",
@@ -38,21 +37,21 @@
   },
   "homepage": "https://github.com/astrum-forge/bvx-kit",
   "devDependencies": {
-    "@eslint/js": "^9.20.0",
-    "@types/eslint__js": "^8.42.3",
-    "@types/jest": "^29.5.14",
-    "@typescript-eslint/eslint-plugin": "^8.24.1",
-    "@typescript-eslint/parser": "^8.24.1",
+    "@swc/core": "^1.16.1",
+    "@swc/jest": "^0.2.39",
     "@webgpu/types": "^0.1.72",
-    "eslint": "^9.20.1",
-    "globals": "^15.15.0",
-    "jest": "^29.7.0",
-    "ts-jest": "^29.2.5",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.7.3",
-    "typescript-eslint": "^8.24.1"
+    "jest": "^30.4.2",
+    "oxlint": "^1.79.0",
+    "typescript": "^7.0.2"
   },
   "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
     "access": "public"
-  }
+  },
+  "files": [
+    "out/",
+    "README.md",
+    "LICENSE",
+    "SKILL.md"
+  ]
 }

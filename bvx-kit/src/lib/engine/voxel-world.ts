@@ -32,11 +32,17 @@ export class VoxelWorld {
      */
     private readonly _voxelRaycaster: VoxelRaycaster;
 
-    constructor() {
-        // The default bucket count suits a large resident world. A world that only ever
-        // holds a handful of chunks, such as the neighbourhood a mesh request carries,
-        // can pass a smaller count to avoid allocating the bucket array.
-        this._voxelChunks = new HashGrid<MortonKey, VoxelChunk>();
+    /**
+     * Constructs a new VoxelWorld.
+     *
+     * @param buckets - (Optional) The number of hash buckets to index chunks across,
+     * rounded up to a power of two. The default suits a large resident world; a world
+     * that only ever holds a handful of chunks - the 27-chunk neighbourhood a mesh
+     * request binds, for instance - should pass a small count, because the empty bucket
+     * array is allocated either way. See HashGrid.
+     */
+    constructor(buckets: number = HashGrid.DEFAULT_SIZE) {
+        this._voxelChunks = new HashGrid<MortonKey, VoxelChunk>(buckets);
 
         // Initialize the VoxelRaycaster for querying voxel data within this world.
         this._voxelRaycaster = new VoxelRaycaster(this);
@@ -99,6 +105,14 @@ export class VoxelWorld {
      */
     public insert(chunk: VoxelChunk): void {
         this._voxelChunks.set(chunk.key, chunk);
+    }
+
+    /**
+     * Removes every chunk from the world, keeping the index's bucket array so a world
+     * that is refilled repeatedly allocates nothing per refill.
+     */
+    public clear(): void {
+        this._voxelChunks.clear();
     }
 
     /**

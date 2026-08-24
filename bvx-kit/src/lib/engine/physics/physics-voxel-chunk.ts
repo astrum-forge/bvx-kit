@@ -1,4 +1,5 @@
 import { BitArray } from "../../containers/bit-array.js";
+import { ChunkStorage } from "../chunks/chunk-storage.js";
 import { MortonKey } from "../../math/morton-key.js";
 import { BVXLayer } from "../layer/bvx-layer.js";
 import { VoxelChunk0 } from "../chunks/voxel-chunk-0.js";
@@ -17,6 +18,16 @@ import { VoxelChunk0 } from "../chunks/voxel-chunk-0.js";
  * Because this is a regular VoxelChunk, physics worlds remain fully
  * compatible with VoxelFaceGeometry, VoxelSmoothGeometry, BVXSerializer and
  * the VoxelRaycaster with no changes to any of them.
+ *
+ * ## Shared storage
+ *
+ * The occupancy can live in a VoxelChunkArena like any other chunk's, which is what
+ * lets a mesher in another agent read a layer's grains without the solver serializing
+ * them. Pass a ChunkStorage and the BitVoxels are a view into the arena.
+ *
+ * The `active` and `moved` masks are deliberately **not** shared. They are solver
+ * bookkeeping with no meaning outside the tick that produced them, nothing else reads
+ * them, and putting them in the arena would double its size for no reader.
  */
 export class PhysicsVoxelChunk extends VoxelChunk0 {
     /**
@@ -36,13 +47,28 @@ export class PhysicsVoxelChunk extends VoxelChunk0 {
     private _activeCount = 0;
 
     /**
+     * The number of grains (set BitVoxels) in this chunk, maintained incrementally by
+     * the owning layer's mutation paths. The constant-time counterpart of length, and
+     * with activeCount what makes per-chunk dormancy (grainCount > activeCount) an O(1)
+     * question - the gate the flow-line wake scans ask per swept chunk.
+     */
+    private _grainCount = 0;
+
+    /**
      * The tick the moved mask was last cleared for. Allows lazy clearing so
      * only chunks that are actually touched pay for the reset.
      */
     private _movedTick = -1;
 
-    constructor(key: MortonKey) {
-        super(key);
+    /**
+     * Constructs a new physics chunk.
+     *
+     * @param key - The MortonKey locating this chunk.
+     * @param storage - (Optional) Externally-owned storage for the BitVoxel occupancy,
+     * typically an arena slot. The solver's own masks always self-allocate.
+     */
+    constructor(key: MortonKey, storage: ChunkStorage | null = null) {
+        super(key, storage);
 
         this._active = new BitArray(BVXLayer.SIZE / 32);
         this._moved = new BitArray(BVXLayer.SIZE / 32);
@@ -67,6 +93,21 @@ export class PhysicsVoxelChunk extends VoxelChunk0 {
      */
     public set activeCount(value: number) {
         this._activeCount = value;
+    }
+
+    /**
+     * Returns the number of grains in this chunk, in constant time. Maintained by the
+     * owning layer - unlike length, which pop-counts the storage.
+     */
+    public get grainCount(): number {
+        return this._grainCount;
+    }
+
+    /**
+     * Sets the number of grains in this chunk. Maintained by the owning layer.
+     */
+    public set grainCount(value: number) {
+        this._grainCount = value;
     }
 
     /**

@@ -100,4 +100,44 @@ describe('VoxelWorld', () => {
         // ensure null is handled properly
         expect(def.cmp(null)).toBe(false);
     });
+
+    it('.constructor() - takes a bucket count for a small world', () => {
+        // The 27-chunk neighbourhood a mesh request binds pays for the default 256
+        // buckets and uses none of them.
+        const small = new VoxelWorld(32);
+
+        expect(small.chunks.size).toEqual(32);
+
+        const big = new VoxelWorld();
+
+        expect(big.chunks.size).toEqual(256);
+
+        // a small world still indexes correctly
+        for (let i = 0; i < 27; i++) {
+            small.insert(new VoxelChunk32(MortonKey.from(i, i >> 1, i >> 2)));
+        }
+
+        expect(small.get(MortonKey.from(5, 2, 1))).not.toBeNull();
+    });
+
+    it('.clear() - drops every chunk and keeps the index usable', () => {
+        const world = new VoxelWorld(16);
+
+        for (let i = 0; i < 12; i++) {
+            world.insert(new VoxelChunk32(MortonKey.from(i, 0, 0)));
+        }
+
+        expect(world.chunks.length).toEqual(12);
+
+        world.clear();
+
+        expect(world.chunks.length).toEqual(0);
+        expect(world.get(MortonKey.from(3, 0, 0))).toBeNull();
+
+        world.insert(new VoxelChunk32(MortonKey.from(7, 0, 0)));
+
+        expect(world.chunks.length).toEqual(1);
+        expect(world.get(MortonKey.from(7, 0, 0))).not.toBeNull();
+    });
+
 });

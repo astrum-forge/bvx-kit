@@ -65,6 +65,18 @@ export interface SmoothMeshResult {
     indexCount: number;
 
     /**
+     * How many vertices were left with an unresolved (zero) normal because the field
+     * gradient at their cell vanished.
+     *
+     * Always 0 from a CPU mesher, which resolves those from the adjacent triangles.
+     * A GPU implementation may not have that pass; reporting the count lets a renderer
+     * detect the case and route the chunk elsewhere rather than discover it as flat
+     * shading. Two diagonally opposite solid corners with nothing else in the cell is
+     * what produces one.
+     */
+    degenerateNormals: number;
+
+    /**
      * Vertex positions in chunk-local units, or null when residency is "gpu".
      */
     vertices: Float32Array | null;

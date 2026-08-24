@@ -260,7 +260,7 @@ export class VoxelQuadGeometry {
         }
 
         if (occlusion !== "none") {
-            this._buildField(center.key, world, occluders, source);
+            this._buildField(center.key, world, occluders, source, touched);
         }
 
         const masks: Uint8Array = faces.indices;
@@ -389,13 +389,36 @@ export class VoxelQuadGeometry {
      * a one-cell border, as the union of the meshed world and the occluder world,
      * or the occluder world alone.
      */
-    private _buildField(key: MortonKey, world: VoxelWorld, occluders: VoxelWorld | null, source: QuadOcclusionSource): void {
+    private _buildField(key: MortonKey, world: VoxelWorld, occluders: VoxelWorld | null, source: QuadOcclusionSource, touched: Uint16Array): void {
         const field: Uint8Array = this._field;
 
         // Cleared in full rather than only the sub-box the border writes. One
         // fill(0) over the whole buffer is a single vectorised memset; clearing a
         // narrower box means many short fills and measures far worse.
         field.fill(0);
+
+        // The AO taps only ever sample within 2 cells of a face-bearing BitVoxel -
+        // one step to the face-adjacent cell, one more for the corner offsets - so
+        // only the touched list's bounding box needs populating. The full walk is a
+        // fixed 5,832 cells however little geometry exists, which for the sparse
+        // chunks physics churn remeshes is nearly all of its cost.
+        let minX = 15, minY = 15, minZ = 15;
+        let maxX = 0, maxY = 0, maxZ = 0;
+
+        for (let t = 0; t < touched.length; t++) {
+            const index: number = touched[t];
+
+            const tx: number = (((index >> 10) & 3) << 2) | ((index >> 4) & 3);
+            const ty: number = (((index >> 8) & 3) << 2) | ((index >> 2) & 3);
+            const tz: number = (((index >> 6) & 3) << 2) | (index & 3);
+
+            minX = tx < minX ? tx : minX;
+            minY = ty < minY ? ty : minY;
+            minZ = tz < minZ ? tz : minZ;
+            maxX = tx > maxX ? tx : maxX;
+            maxY = ty > maxY ? ty : maxY;
+            maxZ = tz > maxZ ? tz : maxZ;
+        }
 
         const worldElements: (Uint32Array | null)[] = this._worldElements;
         const occluderElements: (Uint32Array | null)[] = this._occluderElements;
@@ -424,8 +447,12 @@ export class VoxelQuadGeometry {
         }
 
         const border: number = VoxelQuadGeometry.FIELD_BORDER;
-        const low: number = -border;
-        const high: number = (BVXLayer.DIMS - 1) + border;
+        const low: number = Math.max(-border, minX - 2);
+        const high: number = Math.min((BVXLayer.DIMS - 1) + border, maxX + 2);
+        const lowY: number = Math.max(-border, minY - 2);
+        const highY: number = Math.min((BVXLayer.DIMS - 1) + border, maxY + 2);
+        const lowZ: number = Math.max(-border, minZ - 2);
+        const highZ: number = Math.min((BVXLayer.DIMS - 1) + border, maxZ + 2);
 
         // the border stays under a chunk wide, so (coord >> 4) + 1 still lands on
         // the right slot of the 3x3x3 neighbourhood for every cell sampled
@@ -433,11 +460,11 @@ export class VoxelQuadGeometry {
             const sx: number = (x >> 4) + 1;
             const lx: number = x & 15;
 
-            for (let y = low; y <= high; y++) {
+            for (let y = lowY; y <= highY; y++) {
                 const sy: number = (y >> 4) + 1;
                 const ly: number = y & 15;
 
-                for (let z = low; z <= high; z++) {
+                for (let z = lowZ; z <= highZ; z++) {
                     const slot: number = (sx * 9) + (sy * 3) + ((z >> 4) + 1);
                     const lz: number = z & 15;
 

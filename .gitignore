@@ -5,6 +5,5 @@ bvx-kit/coverage/
 bvx-editor/package-lock.json
 bvx-editor/node_modules/
 bvx-editor/dist/
-.plans/
+
 .DS_Store
-bvx-kit/bench/

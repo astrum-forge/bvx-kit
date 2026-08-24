@@ -1,0 +1,110 @@
+name: Release
+
+# Publishing is tag driven. Push an annotated or lightweight tag named for the
+# version - `2.0.0`, or `v2.0.0` - and this builds, verifies, publishes to
+# GitHub Packages and opens a GitHub Release for it.
+#
+#   git tag 2.0.0 && git push origin 2.0.0
+#
+# Nothing publishes on a branch push, and nothing auto-bumps the version: the
+# tag is the single source of truth for what gets released.
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+-*"
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  release:
+    name: Publish to GitHub Packages
+    runs-on: ubuntu-latest
+    environment: release
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version from tag
+        id: version
+        run: |
+          raw="${GITHUB_REF_NAME}"
+          version="${raw#v}"
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Releasing ${version} from tag ${raw}"
+
+      # setup-node writes the .npmrc that authenticates against GitHub Packages.
+      # The scope must match the repository owner or npm.pkg.github.com rejects
+      # the publish with a 400 - hence @astrum-forge, not @astrumforge.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+          scope: "@astrum-forge"
+
+      - name: Install
+        working-directory: bvx-kit
+        run: npm ci || npm install
+
+      - name: Guard - package name must match the owning org
+        working-directory: bvx-kit
+        run: |
+          name=$(node -p "require('./package.json').name")
+
+          if [ "$name" != "@astrum-forge/bvx-kit" ]; then
+            echo "package name is '$name'; GitHub Packages requires the scope to match the repository owner (astrum-forge)" >&2
+            exit 1
+          fi
+
+      - name: Stamp the version from the tag
+        working-directory: bvx-kit
+        run: |
+          npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
+          printf 'export default "%s";\n' "${{ steps.version.outputs.version }}" > src/version.ts
+
+      - name: Test
+        working-directory: bvx-kit
+        run: npm run test:ci
+
+      - name: Lint
+        working-directory: bvx-kit
+        run: npm run lint
+
+      - name: Build
+        working-directory: bvx-kit
+        run: npm run build-ts
+
+      - name: Stage README, LICENSE and SKILL.md into the package
+        run: |
+          cp README.md bvx-kit/README.md
+          cp LICENSE bvx-kit/LICENSE
+          cp SKILL.md bvx-kit/SKILL.md
+
+      - name: Publish
+        working-directory: bvx-kit
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pack a tarball for the release assets
+        id: pack
+        working-directory: bvx-kit
+        run: |
+          file=$(npm pack --json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8'))[0].filename")
+          echo "file=bvx-kit/${file}" >> "$GITHUB_OUTPUT"
+
+      - name: Create the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: ${{ steps.pack.outputs.file }}
