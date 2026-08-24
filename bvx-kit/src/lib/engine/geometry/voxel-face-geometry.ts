@@ -254,6 +254,219 @@ export class VoxelFaceGeometry extends VoxelGeometry {
      * @param occluders - (Optional) A VoxelWorld whose occupancy additionally culls faces.
      */
     public computeIndices(center: VoxelChunk, world: VoxelWorld, occluders: VoxelWorld | null = null): void {
+        // Two separate walks instead of one parameterised one, deliberately. Routing
+        // the no-occluder case through the merged path binds its sampling arrays
+        // through _MergedElements, whose un-inlined return is type-opaque to the
+        // optimising compiler, and the hot loop's ~7,400 typed-array loads then
+        // re-check what they are reading - measured at 30% occupancy that alone cost
+        // a fifth of this method. Binding the arrays straight off the chunks keeps
+        // the loads specialised, and occluder meshing is the rarer path.
+        if (occluders === null) {
+            this._ComputeIndicesOwn(center, world);
+
+            return;
+        }
+
+        this._ComputeIndicesMerged(center, world, occluders);
+    }
+
+    /**
+     * The no-occluder walk - every sampling array is the chunk's own storage, bound
+     * directly. See computeIndices for why this is a separate method.
+     */
+    private _ComputeIndicesOwn(center: VoxelChunk, world: VoxelWorld): void {
+        // Reset the internal buffer before computing new geometry.
+        this.reset();
+
+        // Local references for reusing objects to reduce allocations.
+        const dfChunk: VoxelChunk = VoxelFaceGeometry.TMP_CHUNK;
+        const dfKey: MortonKey = VoxelFaceGeometry.TMP_MK;
+        const centerKey: MortonKey = center.key;
+
+        // Get neighboring chunks - dfKey holds the queried position per direction.
+        const xp: VoxelChunk = world.getOpt(centerKey.copy(dfKey).incX(), dfChunk);
+        const xn: VoxelChunk = world.getOpt(centerKey.copy(dfKey).decX(), dfChunk);
+        const yp: VoxelChunk = world.getOpt(centerKey.copy(dfKey).incY(), dfChunk);
+        const yn: VoxelChunk = world.getOpt(centerKey.copy(dfKey).decY(), dfChunk);
+        const zp: VoxelChunk = world.getOpt(centerKey.copy(dfKey).incZ(), dfChunk);
+        const zn: VoxelChunk = world.getOpt(centerKey.copy(dfKey).decZ(), dfChunk);
+
+        // BitVoxel storage - visibility and occlusion sampling are the same storage
+        // when no occluder world contributes.
+        const centerOwnElements: Uint32Array = center.layer.bitArray.elements;
+        const centerElements: Uint32Array = centerOwnElements;
+        const xpElements: Uint32Array = xp.layer.bitArray.elements;
+        const xnElements: Uint32Array = xn.layer.bitArray.elements;
+        const ypElements: Uint32Array = yp.layer.bitArray.elements;
+        const ynElements: Uint32Array = yn.layer.bitArray.elements;
+        const zpElements: Uint32Array = zp.layer.bitArray.elements;
+        const znElements: Uint32Array = zn.layer.bitArray.elements;
+
+        // Uniform-chunk fast paths. Most chunks in a world with real depth are entirely
+        // air or entirely solid ground, and both produce no geometry at all - but the
+        // solid case is the single most expensive chunk to discover that about, because
+        // every one of its 4096 BitVoxels is set and samples six neighbours only to find
+        // itself enclosed.
+        //
+        // Both tests run against the merged storages, so they stay correct when an
+        // occluder world is contributing occupancy.
+        const centerState: number = BitArray.uniformState(centerOwnElements);
+
+        // nothing is set, so nothing can emit a face
+        if (centerState === BitArray.EMPTY) {
+            this.commit(0, 0);
+
+            return;
+        }
+
+        // Precomputed neighbour lookup tables for each face direction.
+        const tables: Int16Array[] = VoxelFaceGeometry._NEIGHBOUR_TABLES;
+        const tableXP: Int16Array = tables[0];
+        const tableXN: Int16Array = tables[1];
+        const tableYP: Int16Array = tables[2];
+        const tableYN: Int16Array = tables[3];
+        const tableZP: Int16Array = tables[4];
+        const tableZN: Int16Array = tables[5];
+
+        // Geometry output. Populated entries are appended to the touched list in
+        // ascending order and the totals are published once at the end of the pass -
+        // see VoxelGeometry.touchedBuffer for why this is open-coded.
+        const indices: Uint8Array = this.indices;
+        const touched: Uint16Array = this.touchedBuffer;
+        const faceCounts: Uint8Array = VoxelFaceGeometry._MASK_FACE_COUNTS;
+
+        let touchedCount = 0;
+        let faceCount = 0;
+
+        // Solid-center fast path. With every BitVoxel set, every in-chunk neighbour is
+        // set too, so no interior BitVoxel can be visible and the only faces that can
+        // survive are those pointing out of the chunk. Walking the 1352 boundary
+        // BitVoxels and sampling only their cross-chunk neighbours replaces 4096 x 6
+        // samples with roughly 1352 x 1.3 of them.
+        //
+        // This is the shell of ground directly beneath a surface. Chunks buried deeper
+        // exit on the first neighbour test below and never reach the loop at all.
+        if (centerState === BitArray.FULL) {
+            // A solid neighbour hides the whole face pointing at it. Resolving that
+            // once per direction lets the buried case - solid ground surrounded by
+            // solid ground - return without touching a single BitVoxel, and lets the
+            // shell case skip the memory reads for whichever directions are covered.
+            const xpFull: boolean = BitArray.uniformState(xpElements) === BitArray.FULL;
+            const xnFull: boolean = BitArray.uniformState(xnElements) === BitArray.FULL;
+            const ypFull: boolean = BitArray.uniformState(ypElements) === BitArray.FULL;
+            const ynFull: boolean = BitArray.uniformState(ynElements) === BitArray.FULL;
+            const zpFull: boolean = BitArray.uniformState(zpElements) === BitArray.FULL;
+            const znFull: boolean = BitArray.uniformState(znElements) === BitArray.FULL;
+
+            if (xpFull && xnFull && ypFull && ynFull && zpFull && znFull) {
+                this.commit(0, 0);
+
+                return;
+            }
+
+            const boundary: Uint16Array = VoxelFaceGeometry._BOUNDARY_INDICES;
+            const length: number = boundary.length;
+
+            for (let b = 0; b < length; b++) {
+                const index: number = boundary[b];
+
+                // a negative table entry means the neighbour lives in the adjacent
+                // chunk - every non-negative entry is an in-chunk neighbour, which a
+                // solid center guarantees is set and therefore hides the face
+                const nxp: number = tableXP[index];
+                const nxn: number = tableXN[index];
+                const nyp: number = tableYP[index];
+                const nyn: number = tableYN[index];
+                const nzp: number = tableZP[index];
+                const nzn: number = tableZN[index];
+
+                const mask: number =
+                    (nxp < 0 && !xpFull ? ((xpElements[(~nxp) >> 5] >>> (~nxp & 31)) & 1) ^ 1 : 0) << VoxelFaceGeometry.X_POS_INDEX |
+                    (nxn < 0 && !xnFull ? ((xnElements[(~nxn) >> 5] >>> (~nxn & 31)) & 1) ^ 1 : 0) << VoxelFaceGeometry.X_NEG_INDEX |
+                    (nyp < 0 && !ypFull ? ((ypElements[(~nyp) >> 5] >>> (~nyp & 31)) & 1) ^ 1 : 0) << VoxelFaceGeometry.Y_POS_INDEX |
+                    (nyn < 0 && !ynFull ? ((ynElements[(~nyn) >> 5] >>> (~nyn & 31)) & 1) ^ 1 : 0) << VoxelFaceGeometry.Y_NEG_INDEX |
+                    (nzp < 0 && !zpFull ? ((zpElements[(~nzp) >> 5] >>> (~nzp & 31)) & 1) ^ 1 : 0) << VoxelFaceGeometry.Z_POS_INDEX |
+                    (nzn < 0 && !znFull ? ((znElements[(~nzn) >> 5] >>> (~nzn & 31)) & 1) ^ 1 : 0) << VoxelFaceGeometry.Z_NEG_INDEX;
+
+                if (mask === 0) {
+                    continue;
+                }
+
+                indices[index] = mask;
+                touched[touchedCount] = index;
+                touchedCount++;
+                faceCount += faceCounts[mask];
+            }
+
+            this.commit(touchedCount, faceCount);
+
+            return;
+        }
+
+        // Iterate the own BitVoxel storage word-by-word, skipping empty 32 BitVoxel
+        // blocks entirely. This is considerably faster than testing all 4096
+        // BitVoxels individually for sparse chunks. Occlusion sampling below reads
+        // the merged storages instead, so occluder cells cull faces without ever
+        // emitting geometry themselves.
+        const wordCount: number = centerOwnElements.length;
+
+        for (let w = 0; w < wordCount; w++) {
+            let word: number = centerOwnElements[w];
+
+            // Skip if none of the 32 BitVoxels in this word are set.
+            if (word === 0) {
+                continue;
+            }
+
+            const wordOffset: number = w << 5;
+
+            // Process each set bit in the current word using a bit-scan.
+            while (word !== 0) {
+                const lowestBit: number = word & -word;
+                const index: number = wordOffset + (31 - Math.clz32(lowestBit));
+                word ^= lowestBit;
+
+                // Sample the state of the 6 neighbouring BitVoxels.
+                const bvxp: number = VoxelFaceGeometry._SampleState(tableXP, index, centerElements, xpElements); // +x face
+                const bvxn: number = VoxelFaceGeometry._SampleState(tableXN, index, centerElements, xnElements); // -x face
+                const bvyp: number = VoxelFaceGeometry._SampleState(tableYP, index, centerElements, ypElements); // +y face
+                const bvyn: number = VoxelFaceGeometry._SampleState(tableYN, index, centerElements, ynElements); // -y face
+                const bvzp: number = VoxelFaceGeometry._SampleState(tableZP, index, centerElements, zpElements); // +z face
+                const bvzn: number = VoxelFaceGeometry._SampleState(tableZN, index, centerElements, znElements); // -z face
+
+                // A face is rendered only when the neighbouring BitVoxel is OFF.
+                const mask: number =
+                    ((bvxp ^ 1) << VoxelFaceGeometry.X_POS_INDEX) |
+                    ((bvxn ^ 1) << VoxelFaceGeometry.X_NEG_INDEX) |
+                    ((bvyp ^ 1) << VoxelFaceGeometry.Y_POS_INDEX) |
+                    ((bvyn ^ 1) << VoxelFaceGeometry.Y_NEG_INDEX) |
+                    ((bvzp ^ 1) << VoxelFaceGeometry.Z_POS_INDEX) |
+                    ((bvzn ^ 1) << VoxelFaceGeometry.Z_NEG_INDEX);
+
+                // A fully enclosed BitVoxel emits nothing - the index buffer is
+                // already 0 here, so there is no write to make. This is the common
+                // case inside solid ground, where it replaces a store with a branch.
+                if (mask === 0) {
+                    continue;
+                }
+
+                // Bits are scanned lowest-first within ascending words, so indices
+                // are appended in the ascending order the touched list requires.
+                indices[index] = mask;
+                touched[touchedCount] = index;
+                touchedCount++;
+                faceCount += faceCounts[mask];
+            }
+        }
+
+        this.commit(touchedCount, faceCount);
+    }
+
+    /**
+     * The occluder walk - sampling arrays are the own storages merged with the
+     * occluder world's. See computeIndices for why this is a separate method.
+     */
+    private _ComputeIndicesMerged(center: VoxelChunk, world: VoxelWorld, occluders: VoxelWorld): void {
         // Reset the internal buffer before computing new geometry.
         this.reset();
 

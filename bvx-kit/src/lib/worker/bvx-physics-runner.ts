@@ -234,9 +234,36 @@ export interface PhysicsAckResponse {
 }
 
 /**
+ * A request the runner could not process.
+ *
+ * A response rather than a thrown exception, for the same reason the mesher gives one:
+ * an exception escaping a worker's message handler posts nothing, and a caller waiting
+ * on the request id then waits forever. The realistic ways to get one are a step or
+ * edit arriving before attach, an inject naming a layer that does not exist, and an
+ * attach whose world bytes do not decode.
+ */
+export interface PhysicsErrorResponse {
+    /**
+     * The identifier of the originating request, or -1 when the request was too
+     * malformed to carry one.
+     */
+    id: number;
+
+    /**
+     * The type of response.
+     */
+    type: "error";
+
+    /**
+     * What went wrong.
+     */
+    message: string;
+}
+
+/**
  * Union of all physics runner response types.
  */
-export type PhysicsResponse = PhysicsStepResponse | PhysicsAckResponse;
+export type PhysicsResponse = PhysicsStepResponse | PhysicsAckResponse | PhysicsErrorResponse;
 
 /**
  * BVXPhysicsRunner owns a VoxelPhysics simulation and drives it from messages. It is

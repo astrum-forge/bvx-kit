@@ -47,6 +47,14 @@ export class PhysicsVoxelChunk extends VoxelChunk0 {
     private _activeCount = 0;
 
     /**
+     * The number of grains (set BitVoxels) in this chunk, maintained incrementally by
+     * the owning layer's mutation paths. The constant-time counterpart of length, and
+     * with activeCount what makes per-chunk dormancy (grainCount > activeCount) an O(1)
+     * question - the gate the flow-line wake scans ask per swept chunk.
+     */
+    private _grainCount = 0;
+
+    /**
      * The tick the moved mask was last cleared for. Allows lazy clearing so
      * only chunks that are actually touched pay for the reset.
      */
@@ -85,6 +93,21 @@ export class PhysicsVoxelChunk extends VoxelChunk0 {
      */
     public set activeCount(value: number) {
         this._activeCount = value;
+    }
+
+    /**
+     * Returns the number of grains in this chunk, in constant time. Maintained by the
+     * owning layer - unlike length, which pop-counts the storage.
+     */
+    public get grainCount(): number {
+        return this._grainCount;
+    }
+
+    /**
+     * Sets the number of grains in this chunk. Maintained by the owning layer.
+     */
+    public set grainCount(value: number) {
+        this._grainCount = value;
     }
 
     /**

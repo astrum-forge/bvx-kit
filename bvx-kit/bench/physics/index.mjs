@@ -77,7 +77,8 @@ console.log("  tick   moves   dirty   delta B   snapshot B   ratio");
 const dirty = new Set();
 
 for (let tick = 0; tick < 6; tick++) {
-    const moves = local.update();
+    const result = local.update();
+    const moves = typeof result === "object" ? result.moves : result;
 
     dirty.clear();
     sand.drainDirtyChunks(dirty);
@@ -111,7 +112,8 @@ for (let i = 0; i < 4000 && sand.activeCount > 0; i++) {
 sand.drainDirtyChunks(dirty);
 dirty.clear();
 
-const quietMoves = local.update();
+const quietResult = local.update();
+const quietMoves = typeof quietResult === "object" ? quietResult.moves : quietResult;
 
 sand.drainDirtyChunks(dirty);
 
@@ -126,7 +128,8 @@ for (let i = 0; i < 6; i++) {
 }
 
 for (let tick = 0; tick < 6; tick++) {
-    const moves = local.update();
+    const result = local.update();
+    const moves = typeof result === "object" ? result.moves : result;
 
     dirty.clear();
     sand.drainDirtyChunks(dirty);
@@ -151,7 +154,7 @@ for (let tick = 0; tick < 6; tick++) {
 
 // ---- 2. what a move budget does to the peak tick ----
 
-console.log("\npeak tick cost against a move budget\n");
+console.log("\npeak tick cost against a work budget (cell probes)\n");
 console.log("  budget      mean ms   peak ms   ticks to settle");
 
 // the scale report peaked at 163,840 active grains, so match that exactly

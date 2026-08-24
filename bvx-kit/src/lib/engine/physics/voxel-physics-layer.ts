@@ -255,18 +255,40 @@ export class VoxelPhysicsLayer {
     private _moves = 0;
 
     /**
-     * The flow layers of the simulation, resolved once per step(). Their dormant grains
-     * are what gate the lateral flow-line wake scans.
+     * The flow layers of the simulation, resolved once per step(), and their indices
+     * into VoxelPhysics.layers (the cache tables are indexed by layer position). Their
+     * dormant grains are what gate the lateral flow-line wake scans.
      */
     private readonly _ctxFlowLayers: VoxelPhysicsLayer[] = [];
+    private readonly _ctxFlowLayerIndices: number[] = [];
+
+    /**
+     * Whether any layer at all, and whether any flow layer, holds dormant grains in the
+     * swept chunk's 27-chunk neighbourhood - the only place a vacancy wake can reach.
+     * Computed per swept chunk from the O(1) per-chunk grain and active counts, and
+     * switched on mid-sweep when one of this layer's own grains settles; no other
+     * layer's grains can settle during this layer's sweep.
+     *
+     * Waking is idempotent and only a dormant grain has anything to gain from it, so
+     * while _cacheAnyDormant is false the entire vacancy wake is a provable no-op and
+     * is skipped - which is the free-fall phase of every collapse, where the wake
+     * machinery was measured at over 40% of the solver. _cacheFlowDormant gates the
+     * lateral flow-line scans the same way: a sand pile collapsing on dry land no
+     * longer pays for a dormant lake somewhere else entirely.
+     */
+    private _cacheAnyDormant = false;
+    private _cacheFlowDormant = false;
 
     /**
      * Cell probes performed by the current sweep - the solver's unit of work.
      *
-     * Incremented by every _IsOpen and _FindLighterOccupant call, which between
-     * them are what the sweep actually spends its time on. This is the quantity a
-     * caller wanting a bounded tick should budget, rather than grain movements:
-     * see step()'s maxWork parameter for why movements do not predict cost.
+     * Incremented by every _IsOpen and _FindLighterOccupant call, and by every cell a
+     * wake visits (_WakeLocal, and each cell a flow-line scan walks). Between them that
+     * is what the sweep actually spends its time on - measured on a mixed collapse the
+     * wake side alone is over 40% of it, so a budget that did not count it could not
+     * bound a tick's cost. This is the quantity a caller wanting a bounded tick should
+     * budget, rather than grain movements: see step()'s maxWork parameter for why
+     * movements do not predict cost.
      */
     private _work = 0;
 
@@ -472,6 +494,7 @@ export class VoxelPhysicsLayer {
 
         if ((elements[word] & mask) === 0) {
             elements[word] |= mask;
+            chunk.grainCount++;
             this._grainTotal++;
         }
 
@@ -507,6 +530,7 @@ export class VoxelPhysicsLayer {
         }
 
         elements[word] &= ~mask;
+        chunk.grainCount--;
         this._grainTotal--;
 
         // clear the active flag if the grain was awake
@@ -586,6 +610,9 @@ export class VoxelPhysicsLayer {
                 targetElements[i] |= sourceElements[i];
             }
 
+            // the merge may overlap existing grains - re-derive the count from storage
+            target.grainCount = target.length;
+
             this._dirty.add(target.key.key);
         }
 
@@ -637,7 +664,8 @@ export class VoxelPhysicsLayer {
             const activeElements: Uint32Array = chunk.active.elements;
 
             activeElements.set(elements);
-            chunk.activeCount = chunk.length;
+            chunk.grainCount = chunk.length;
+            chunk.activeCount = chunk.grainCount;
 
             this._activeTotal += chunk.activeCount;
 
@@ -743,10 +771,12 @@ export class VoxelPhysicsLayer {
         // the flow layers whose dormant grains gate the lateral wake scans, resolved
         // once per call rather than walked per vacancy
         this._ctxFlowLayers.length = 0;
+        this._ctxFlowLayerIndices.length = 0;
 
         for (let l = 0; l < layers.length; l++) {
             if (layers[l]._flow) {
                 this._ctxFlowLayers.push(layers[l]);
+                this._ctxFlowLayerIndices.push(l);
             }
         }
 
@@ -768,7 +798,7 @@ export class VoxelPhysicsLayer {
             if (chunk.activeCount <= 0) {
                 this._activeChunks.delete(key);
 
-                if (chunk.length === 0) {
+                if (chunk.grainCount === 0) {
                     this._DropChunk(key, chunk);
                     this._dirty.add(key);
                 }
@@ -947,6 +977,42 @@ export class VoxelPhysicsLayer {
                 }
             }
         }
+
+        // Does anything a vacancy wake could reach hold dormant grains? A wake touches
+        // at most one cell beyond the vacated cell, and a flow-line scan at most 15
+        // laterally, so everything reachable is inside these 27 slots - a chunk-level
+        // count check over them is a sound, O(1)-per-vacancy gate. Switched on
+        // mid-sweep by this layer's own grains settling (see _SweepChunk); other
+        // layers' grains can only settle during their own step, which refills these
+        // caches anyway.
+        let anyDormant = false;
+        let flowDormant = false;
+
+        for (let l = 0; l < layers.length; l++) {
+            const chunks: (PhysicsVoxelChunk | null)[] = this._cacheChunks[l];
+            const isFlow: boolean = layers[l]._flow;
+
+            for (let slot = 0; slot < 27; slot++) {
+                const chunk: PhysicsVoxelChunk | null = chunks[slot];
+
+                if (chunk !== null && chunk.grainCount > chunk.activeCount) {
+                    anyDormant = true;
+
+                    if (isFlow) {
+                        flowDormant = true;
+                    }
+
+                    break;
+                }
+            }
+
+            if (flowDormant) {
+                break;
+            }
+        }
+
+        this._cacheAnyDormant = anyDormant;
+        this._cacheFlowDormant = flowDormant;
     }
 
     /**
@@ -1028,6 +1094,8 @@ export class VoxelPhysicsLayer {
      * coordinates, using the neighbourhood caches.
      */
     private _WakeLocal(lx: number, ly: number, lz: number): void {
+        this._work++;
+
         const slot: number = VoxelPhysicsLayer._SLOT_X[lx + 16] + VoxelPhysicsLayer._SLOT_Y[ly + 16] + VoxelPhysicsLayer._SLOT_Z[lz + 16];
         const index: number = VoxelPhysicsLayer._IDX_X[lx + 16] | VoxelPhysicsLayer._IDX_Y[ly + 16] | VoxelPhysicsLayer._IDX_Z[lz + 16];
         const word: number = index >> 5;
@@ -1053,6 +1121,13 @@ export class VoxelPhysicsLayer {
      * scan path to a drop-off.
      */
     private _WakeVacancy(lx: number, ly: number, lz: number): void {
+        // While nothing reachable is dormant, waking is a provable no-op - every grain
+        // a wake could find is already awake - so the whole neighbourhood walk is
+        // skipped. This is the free-fall phase of a collapse, its hottest stretch.
+        if (!this._cacheAnyDormant) {
+            return;
+        }
+
         this._WakeLocal(lx, ly + 1, lz);
         this._WakeLocal(lx + 1, ly + 1, lz);
         this._WakeLocal(lx - 1, ly + 1, lz);
@@ -1065,30 +1140,19 @@ export class VoxelPhysicsLayer {
 
         // Lateral wake propagation for flow layers - the vacancy may sit on the scan
         // path of a dormant grain (at its own level) or may be the drop cell a dormant
-        // grain one level up can now reach. Skipped entirely while every flow grain is
-        // already awake, as there is nothing to wake.
-        //
-        // Asked of the flow layers directly rather than tracked as a tick-scoped flag on
-        // the coordinator. Dormancy is exactly grainCount > activeCount, so a live check
-        // over the one to three flow layers is both cheaper than the round trip and
-        // strictly more precise than a sticky flag - it goes false again the moment the
-        // last dormant grain wakes, instead of at the end of the tick.
+        // grain one level up can now reach. Skipped entirely while no flow layer holds a
+        // dormant grain anywhere the scan could reach - the 27-chunk neighbourhood, as
+        // pre-computed by _FillCaches - so a sand pile collapsing on dry land pays
+        // nothing for a settled lake somewhere else in the world. Measured on a mixed
+        // collapse the scans were a fifth of the whole solver before this gate.
         const maxFlow: number = this._physics.maxFlowDistance;
 
-        if (maxFlow <= 1) {
+        if (maxFlow <= 1 || !this._cacheFlowDormant) {
             return;
         }
 
-        const flowLayers: VoxelPhysicsLayer[] = this._ctxFlowLayers;
-
-        for (let l = 0; l < flowLayers.length; l++) {
-            if (flowLayers[l].hasDormantGrains) {
-                this._WakeFlowLines(lx, ly, lz, maxFlow);
-                this._WakeFlowLines(lx, ly + 1, lz, maxFlow);
-
-                return;
-            }
-        }
+        this._WakeFlowLines(lx, ly, lz, maxFlow);
+        this._WakeFlowLines(lx, ly + 1, lz, maxFlow);
     }
 
     /**
@@ -1134,6 +1198,8 @@ export class VoxelPhysicsLayer {
             const idxY: number = VoxelPhysicsLayer._IDX_Y[ly + 16];
 
             for (let reach = 2; reach <= reachLimit; reach++) {
+                this._work++;
+
                 const nx: number = lx + (dx * reach);
                 const nz: number = lz + (dz * reach);
 
@@ -1205,6 +1271,7 @@ export class VoxelPhysicsLayer {
         // vacate the source cell
         chunk.layer.bitArray.elements[fromWord] &= ~fromMask;
         chunk.active.elements[fromWord] &= ~fromMask;
+        chunk.grainCount--;
         chunk.activeCount--;
         this._activeTotal--;
 
@@ -1216,6 +1283,7 @@ export class VoxelPhysicsLayer {
         const targetMask: number = 1 << (targetIndex & 31);
 
         target.layer.bitArray.elements[targetWord] |= targetMask;
+        target.grainCount++;
         target.movedForTick(this._ctxTick)[targetWord] |= targetMask;
 
         this._Activate(target, targetIndex);
@@ -1247,12 +1315,14 @@ export class VoxelPhysicsLayer {
         // this layer's grain sinks from the source cell into the target cell
         chunk.layer.bitArray.elements[fromWord] &= ~fromMask;
         chunk.active.elements[fromWord] &= ~fromMask;
+        chunk.grainCount--;
         chunk.activeCount--;
         this._activeTotal--;
 
         const ownTarget: PhysicsVoxelChunk = this._EnsureChunkLocal(tx, ty, tz);
 
         ownTarget.layer.bitArray.elements[targetWord] |= targetMask;
+        ownTarget.grainCount++;
         ownTarget.movedForTick(tick)[targetWord] |= targetMask;
 
         this._Activate(ownTarget, targetIndex);
@@ -1265,6 +1335,7 @@ export class VoxelPhysicsLayer {
         const otherSource: PhysicsVoxelChunk = this._cacheChunks[otherIndex][targetSlot] as PhysicsVoxelChunk;
 
         otherSource.layer.bitArray.elements[targetWord] &= ~targetMask;
+        otherSource.grainCount--;
 
         if ((otherSource.active.elements[targetWord] & targetMask) !== 0) {
             otherSource.active.elements[targetWord] &= ~targetMask;
@@ -1275,6 +1346,7 @@ export class VoxelPhysicsLayer {
         const otherTarget: PhysicsVoxelChunk = other._EnsureChunk(this._ctxChunkX + (fx >> 4), this._ctxChunkY + (fy >> 4), this._ctxChunkZ + (fz >> 4));
 
         otherTarget.layer.bitArray.elements[fromWord] |= fromMask;
+        otherTarget.grainCount++;
         otherTarget.movedForTick(tick)[fromWord] |= fromMask;
 
         other._Activate(otherTarget, fromIndex);
@@ -1512,10 +1584,18 @@ export class VoxelPhysicsLayer {
                         continue;
                     }
 
-                    // 5) nowhere to go - settle until a nearby cell changes
+                    // 5) nowhere to go - settle until a nearby cell changes. The grain
+                    // is now a dormant neighbour the vacancy gates computed at
+                    // cache-fill time cannot know about, so they are armed here.
                     activeElements[word] &= ~mask;
                     chunk.activeCount--;
                     this._activeTotal--;
+
+                    this._cacheAnyDormant = true;
+
+                    if (flow) {
+                        this._cacheFlowDormant = true;
+                    }
                 }
             }
         }

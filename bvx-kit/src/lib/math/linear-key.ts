@@ -10,7 +10,7 @@ import { Key } from "./key.js";
  * 1024 becomes 0, 1025 becomes 1, and so on.
  * Negative values also wrap around, e.g., -1 becomes 1023, -2 becomes 1022.
  * 
- * This is a cache-inefficient but faster alternative to Morton keys, making it
+ * This is a hash-distribution-inefficient but faster to encode and decode alternative to Morton keys, making it
  * useful for specific performance-sensitive applications.
  */
 export class LinearKey implements Key {

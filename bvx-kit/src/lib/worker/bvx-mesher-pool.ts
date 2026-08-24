@@ -205,6 +205,13 @@ export class BVXMesherPool<TRequest extends MesherRequestBase = MesherRequest, T
     private readonly _load: number[];
 
     /**
+     * Whether each worker has reported a failure. A dead worker is never dispatched to
+     * again - its message port may be gone, and a request posted there would sit
+     * unanswered forever with its promise never settling.
+     */
+    private readonly _dead: boolean[];
+
+    /**
      * The most requests one worker may hold at once.
      */
     private readonly _inFlightPerWorker: number;
@@ -276,6 +283,7 @@ export class BVXMesherPool<TRequest extends MesherRequestBase = MesherRequest, T
 
         this._workers = options.workers.slice();
         this._load = new Array<number>(this._workers.length).fill(0);
+        this._dead = new Array<boolean>(this._workers.length).fill(false);
         this._inFlightPerWorker = Math.max(1, options.inFlightPerWorker ?? 1);
         this._maxQueued = Math.max(0, options.maxQueued ?? 0);
         this._queue = [];
@@ -639,6 +647,10 @@ export class BVXMesherPool<TRequest extends MesherRequestBase = MesherRequest, T
         const capacity: number = this._inFlightPerWorker;
 
         for (let index = 0; index < workers.length && this._queue.length > 0; index++) {
+            if (this._dead[index]) {
+                continue;
+            }
+
             while (this._load[index] < capacity && this._queue.length > 0) {
                 const job: PendingJob<TRequest, TResponse> = this._queue.shift() as PendingJob<TRequest, TResponse>;
 
@@ -714,6 +726,8 @@ export class BVXMesherPool<TRequest extends MesherRequestBase = MesherRequest, T
      * Rejects everything assigned to a worker that failed, and stops using it.
      */
     private _FailWorker(index: number): void {
+        this._dead[index] = true;
+
         for (const [id, worker] of this._assigned) {
             if (worker !== index) {
                 continue;
@@ -732,6 +746,19 @@ export class BVXMesherPool<TRequest extends MesherRequestBase = MesherRequest, T
         }
 
         this._load[index] = 0;
+
+        // with no live worker left, everything still queued can never run
+        if (this._dead.every((dead) => dead)) {
+            for (const job of this._queue) {
+                this._queued.delete(job.key);
+                BVXMesherPool._Unhook(job);
+                this._Reclaim(job.request);
+
+                job.reject(new MesherPoolError("failed", "BVXMesherPool - every worker has failed; the queue cannot be served", job.key));
+            }
+
+            this._queue.length = 0;
+        }
 
         this._Pump();
         this._Settle();

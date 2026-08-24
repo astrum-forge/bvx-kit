@@ -155,6 +155,14 @@ export class BVXWorkerHost {
         scope.onmessage = (event: { data: MesherRequest | MesherControl }): void => {
             const message: MesherRequest | MesherControl = event.data;
 
+            // read no property before this guard - a null message would throw out of
+            // the handler and the caller's promise would never settle
+            if (message === null || typeof message !== "object") {
+                scope.postMessage({ id: -1, type: "error", chunkKey: 0, message: "BVXWorkerHost - the message is not a MesherRequest" });
+
+                return;
+            }
+
             if (message.type === "bind-arena") {
                 scope.postMessage(this._Bind(message));
 

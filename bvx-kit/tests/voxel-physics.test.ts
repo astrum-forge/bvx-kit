@@ -503,9 +503,11 @@ describe('VoxelPhysics', () => {
         expect(budgeted.work).toBeLessThan(unbudgeted.work);
 
         // The cap is honoured to within one y-plane of a chunk, which is where the
-        // sweep checks it - not to the exact probe.
+        // sweep checks it - not to the exact probe. A plane's work includes the wake
+        // visits its moves trigger (they are cells examined like any other), so the
+        // overshoot is bounded by a plane's full cost rather than its probe count.
         expect(budgeted.work).toBeGreaterThanOrEqual(limit);
-        expect(budgeted.work).toBeLessThan(limit * 4);
+        expect(budgeted.work).toBeLessThan(limit * 8);
 
         // no grain is lost or duplicated by stopping mid-chunk
         expect(sand.length).toEqual(total);

@@ -86,10 +86,9 @@ const full = time(() => {
         mesher.process({
             id: i,
             type: "smooth",
-            chunkKey: batch[i].key.key,
             smoothing: 2,
             flipped: false,
-            world: snapshots[i]
+            payload: { kind: "snapshot", chunkKey: batch[i].key.key, world: snapshots[i] }
         });
     }
 });
@@ -144,10 +143,9 @@ const faceFull = time(() => {
         mesher.process({
             id: i,
             type: "faces",
-            chunkKey: batch[i].key.key,
             flipped: false,
-            world: snapshots[i],
-            indices: false
+            indices: false,
+            payload: { kind: "snapshot", chunkKey: batch[i].key.key, world: snapshots[i] }
         });
     }
 });
@@ -157,8 +155,7 @@ const quadFull = time(() => {
         mesher.process({
             id: i,
             type: "quads",
-            chunkKey: batch[i].key.key,
-            world: snapshots[i]
+            payload: { kind: "snapshot", chunkKey: batch[i].key.key, world: snapshots[i] }
         });
     }
 });

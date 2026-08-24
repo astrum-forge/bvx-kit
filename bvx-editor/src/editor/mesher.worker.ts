@@ -77,11 +77,34 @@ self.onmessage = (event: MessageEvent<EditorMeshRequest>): void => {
         (self as unknown as Worker).postMessage(response, BVXMesher.transferables(response));
     }
     catch (error) {
+        // Derive the key defensively - a payload malformed enough to make process()
+        // throw can make chunkKeyOf() throw too, and an exception from inside this
+        // handler is the exact unanswered-promise hang the handler exists to prevent.
+        let chunkKey = 0;
+
+        try {
+            chunkKey = BVXMesher.chunkKeyOf(request.payload);
+        }
+        catch {
+            // keep 0 - the pool routes by request id, not by chunk key
+        }
+
+        // hand the request's occupancy buffers back even on failure, or the pool
+        // allocates replacements for every buffer an error strands in this worker
+        let recycle: Uint32Array[] | undefined;
+
+        if (request.payload?.kind === "neighbourhood") {
+            recycle = request.payload.occluders !== undefined
+                ? [request.payload.chunk.occupancy, request.payload.occluders.occupancy]
+                : [request.payload.chunk.occupancy];
+        }
+
         (self as unknown as Worker).postMessage({
             id: request.id,
             type: "error",
-            chunkKey: BVXMesher.chunkKeyOf(request.payload),
+            chunkKey: chunkKey,
+            recycle: recycle,
             message: error instanceof Error ? error.message : String(error)
-        });
+        }, recycle !== undefined ? recycle.map((view) => view.buffer as ArrayBuffer) : []);
     }
 };

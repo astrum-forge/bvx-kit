@@ -166,7 +166,8 @@ console.log(`\nserialized sizes: chunk ${savedChunk.length} bytes (raw 585), wor
 
     // simulate until fully dormant
     while (ticks < 1000) {
-        const moves = physics.update();
+        const result = physics.update();
+        const moves = typeof result === "object" ? result.moves : result;
         totalMoves += moves;
         ticks++;
 

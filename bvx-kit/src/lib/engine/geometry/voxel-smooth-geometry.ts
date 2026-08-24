@@ -1,3 +1,4 @@
+import { BitArray } from "../../containers/bit-array.js";
 import { MortonKey } from "../../math/morton-key.js";
 import { VoxelChunk } from "../chunks/voxel-chunk.js";
 import { BVXLayer } from "../layer/bvx-layer.js";
@@ -143,6 +144,12 @@ export class VoxelSmoothGeometry {
     private _occludersActive = false;
 
     /**
+     * How many samples the most recent _SampleField set - the uniform-field early-out
+     * compares this against the sampled volume.
+     */
+    private _sampleSetCount = 0;
+
+    /**
      * The ownership mode for blur-ambiguous surface cells (see SmoothOcclusionMode).
      */
     private _occlusionMode: SmoothOcclusionMode = "primary";
@@ -286,6 +293,19 @@ export class VoxelSmoothGeometry {
         // sample the occupancy field from the center chunk and its neighbours
         const negativeNeighbours: boolean[] = this._SampleField(center, world, margin, occluders);
 
+        // Uniform-field early-out. A field that is entirely empty or entirely solid
+        // across the sampled region cannot cross the iso level: the blur is clamped to
+        // the active region, so a constant field blurs to itself, and contouring a
+        // constant field emits nothing. In a world with real depth most chunks are
+        // exactly this - open air or buried ground - and without the early-out each
+        // one paid nearly the full price of a surface chunk to produce zero output
+        // (measured 0.2 ms per solid chunk at smoothing 2).
+        const span: number = BVXLayer.DIMS + (margin * 2);
+
+        if (this._sampleSetCount === 0 || this._sampleSetCount === span * span * span) {
+            return;
+        }
+
         // blur the field for each smoothing pass
         for (let pass = 0; pass < passes; pass++) {
             this._SmoothField(margin, this._field);
@@ -344,6 +364,8 @@ export class VoxelSmoothGeometry {
         const dims: number = BVXLayer.DIMS;
         const fieldDims: number = VoxelSmoothGeometry._FIELD_DIMS;
         const field: Float32Array = this._field;
+
+        let setCount = 0;
         const centerKey: MortonKey = center.key;
         const tmpKey: MortonKey = VoxelSmoothGeometry.TMP_MK;
 
@@ -384,6 +406,47 @@ export class VoxelSmoothGeometry {
         }
 
         this._occludersActive = occludersActive;
+
+        // Chunk-level uniformity pre-check. When every slot the sampling could read is
+        // uniformly solid, or every one is absent or uniformly empty, the sampled field
+        // is a constant and computeGeometry's early-out fires on the count alone - the
+        // per-sample loop and the field fill are skipped entirely. This is the buried
+        // and open-air case, the bulk of a world with real depth. Skipped when an
+        // occluder chunk is present: merged fullness is not a chunk-level question.
+        if (!occludersActive) {
+            let allFull = true;
+            let allEmpty = true;
+
+            for (let slot = 0; slot < 27 && (allFull || allEmpty); slot++) {
+                const elements: Uint32Array | null = neighbourhood[slot];
+
+                if (elements === null) {
+                    allFull = false;
+
+                    continue;
+                }
+
+                const state: number = BitArray.uniformState(elements);
+
+                allFull = allFull && state === BitArray.FULL;
+                allEmpty = allEmpty && state === BitArray.EMPTY;
+            }
+
+            if (allFull || allEmpty) {
+                const span: number = dims + (margin * 2);
+
+                this._sampleSetCount = allFull ? span * span * span : 0;
+
+                const negativeSlots: number[] = [4, 10, 12]; // (-1,0,0) (0,-1,0) (0,0,-1)
+                const negativeNeighbours: boolean[] = new Array<boolean>(3);
+
+                for (let axis = 0; axis < 3; axis++) {
+                    negativeNeighbours[axis] = neighbourhood[negativeSlots[axis]] !== null;
+                }
+
+                return negativeNeighbours;
+            }
+        }
 
         field.fill(0.0);
 
@@ -431,6 +494,7 @@ export class VoxelSmoothGeometry {
                         const fieldIndex: number = ((sx + margin) * fieldDims + (sy + margin)) * fieldDims + (sz + margin);
 
                         field[fieldIndex] = 1.0;
+                        setCount++;
 
                         if (occludersActive) {
                             rawMerged[fieldIndex] = 1;
@@ -440,6 +504,8 @@ export class VoxelSmoothGeometry {
                 }
             }
         }
+
+        this._sampleSetCount = setCount;
 
         // Existence flags for the negative-side neighbours (seam quad ownership).
         // A chunk held only by the occluders still counts: with occluders a layer

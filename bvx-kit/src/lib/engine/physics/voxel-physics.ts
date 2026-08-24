@@ -249,7 +249,10 @@ export class VoxelPhysics {
      *
      * The budget is denominated in cell probes rather than milliseconds so that a given
      * input produces the same simulation on every machine, and rather than in grain
-     * movements because movements do not predict cost - the expensive grains are the
+     * movements because movements do not predict cost. Every cell the solver examines
+     * counts: occupancy probes and the cells its wake scans visit, which on a mixed
+     * collapse are over 40% of the real cost - a budget that skipped them could not
+     * bound a tick - the expensive grains are the
      * ones that do NOT move. A grain with nowhere to go still pays for every probe that
      * discovered as much, and for a flowing layer that search is the most expensive
      * thing the solver does. Measured on a collapsing lake, a tick doing 6,000
