@@ -184,6 +184,27 @@ export class HashGrid<K extends Key, V> {
     }
 
     /**
+     * Removes every key-value pair, keeping the bucket array so a grid that is
+     * refilled every frame - the 27-chunk neighbourhood a mesh request binds, for
+     * instance - allocates nothing per refill. Buckets that were created stay
+     * created and are simply emptied.
+     */
+    public clear(): void {
+        const dict: (Map<number, V> | undefined)[] = this._dict;
+        const size: number = this._size;
+
+        for (let i = 0; i < size; i++) {
+            const bucket: Map<number, V> | undefined = dict[i];
+
+            if (bucket !== undefined && bucket.size !== 0) {
+                bucket.clear();
+            }
+        }
+
+        this._count = 0;
+    }
+
+    /**
      * Removes the key-value pair associated with the given key, if it exists.
      *
      * @param key - The key to remove.

@@ -1,5 +1,5 @@
 <h3 align="center">
-  <img src="graphics/icon_2.png?raw=true" alt="Astrum Forge Studios Logo" width="400">
+  <img src="https://raw.githubusercontent.com/astrum-forge/bvx-kit/main/graphics/icon_2.png?raw=true" alt="Astrum Forge Studios Logo" width="400">
 </h3>
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -11,7 +11,7 @@
 **_BitVoxel Engine_** is an optimized voxel rendering and data management engine, designed to be both generic and renderer-agnostic. Written in TypeScript, it introduces a unique approach to voxel-based environments by decoupling voxel meta-data from rendering states, resulting in efficient memory usage and improved rendering performance—especially in large, destructible worlds.
 
 <h3 align="center">
-  <img src="graphics/info.jpg?raw=true" alt="BitVoxel Layer Composition" width="800">
+  <img src="https://raw.githubusercontent.com/astrum-forge/bvx-kit/main/graphics/info.jpg?raw=true" alt="BitVoxel Layer Composition" width="800">
 </h3>
 
 ## What is BitVoxel Engine?
@@ -36,23 +36,36 @@ The **BitVoxel Engine** features a highly optimized architecture focused on memo
 The **Geometry Lookup Table (LUT)** pre-computes **vertices**, **normals**, and **indices** for 3D BitVoxel rendering. It uses a 6-bit BitVoxel Geometry Index to generate variations for Voxel Face Rendering. Surfaces that are invisible or fully occluded will not be rendered, optimizing the rendering pipeline.
 
 <h3 align="center">
-  <img src="graphics/lut.png?raw=true" alt="BitVoxel LUT Image" width="500">
+  <img src="https://raw.githubusercontent.com/astrum-forge/bvx-kit/main/graphics/lut.png?raw=true" alt="BitVoxel LUT Image" width="500">
 </h3>
 
 ## Installation
 
-Install the **BitVoxel Engine** using npm:
+The engine is published to **GitHub Packages**. Point the scope at that registry and
+authenticate - GitHub Packages requires a token even for public packages:
+
+```ini
+# .npmrc, next to your package.json
+@astrum-forge:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
+```
 
 ```bash
-npm install @astrumforge/bvx-kit
+npm install @astrum-forge/bvx-kit
 ```
+
+A `GITHUB_TOKEN` with `read:packages` is enough. In GitHub Actions the built-in
+`secrets.GITHUB_TOKEN` works as-is.
+
+> Upgrading from 1.x? The scope changed from `@astrumforge` to `@astrum-forge`, and 2.0
+> makes three breaking changes. See **[MIGRATION.md](MIGRATION.md)**.
 
 ## Quick Setup
 
 Here’s how you can quickly set up **BitVoxel Engine** and start managing voxel chunks within a voxel world:
 
 ```typescript
-import { MortonKey, VoxelChunk, VoxelChunk32, VoxelWorld } from '@astrumforge/bvx-kit';
+import { MortonKey, VoxelChunk, VoxelChunk32, VoxelWorld } from '@astrum-forge/bvx-kit';
 
 // Create a new VoxelWorld instance
 const world: VoxelWorld = new VoxelWorld();
@@ -77,7 +90,7 @@ if (prevChunk !== null) {
 In addition to the blocky face geometry path (`VoxelFaceGeometry` + `BVXGeometry`), the engine provides **`VoxelSmoothGeometry`**, a Naive Surface Nets mesher that generates smooth, renderer-agnostic triangle meshes (positions, normals and indices) directly from BitVoxel data. Meshes are watertight across chunk seams and an optional smoothing parameter (0-3 field blur passes) produces progressively softer surfaces:
 
 ```typescript
-import { VoxelSmoothGeometry } from '@astrumforge/bvx-kit';
+import { VoxelSmoothGeometry } from '@astrum-forge/bvx-kit';
 
 const geometry = new VoxelSmoothGeometry();
 
@@ -95,7 +108,7 @@ renderer.upload(geometry.vertices, geometry.normals, geometry.indices);
 The application drives the simulation through an explicit update hook and remeshes only what moved:
 
 ```typescript
-import { VoxelPhysics } from '@astrumforge/bvx-kit';
+import { VoxelPhysics } from '@astrum-forge/bvx-kit';
 
 const physics = new VoxelPhysics(world, { maxX: 127, maxY: 127, maxZ: 127 });
 const sand = physics.addLayer(VoxelPhysics.SAND);
@@ -119,7 +132,7 @@ Grains that cannot move go dormant and cost nothing until a nearby cell changes 
 **`BVXSerializer`** provides compact, versioned binary serialization for single chunks or entire worlds. Saving returns the binary data and loading accepts the binary data — where the bytes are stored (file, network, IndexedDB) is application logic. BitVoxel layers and meta-data are run-length encoded when that is smaller than the raw payload:
 
 ```typescript
-import { BVXSerializer } from '@astrumforge/bvx-kit';
+import { BVXSerializer } from '@astrum-forge/bvx-kit';
 
 const chunkBytes: Uint8Array = BVXSerializer.saveChunk(chunk);
 const worldBytes: Uint8Array = BVXSerializer.saveWorld(world);
@@ -130,14 +143,57 @@ const loadedWorld = BVXSerializer.loadWorld(worldBytes);
 
 ## Web Workers
 
-Geometry generation can be moved off the main thread with **`BVXMesher`** and **`BVXWorkerHost`**. The core stays platform-agnostic — your application provides a tiny worker entry file and posts `MesherRequest` messages built from serialized world snapshots. Geometry buffers are returned as transferables:
+Geometry generation moves off the main thread with **`BVXMesher`**, **`BVXWorkerHost`** and **`BVXMesherPool`**. The core stays platform-agnostic: your application provides a tiny worker entry file, and the pool handles dispatch, coalescing, cancellation and buffer recycling.
 
 ```typescript
 // mesher.worker.ts - your application's worker entry
-import { BVXWorkerHost } from '@astrumforge/bvx-kit';
+import { BVXWorkerHost } from '@astrum-forge/bvx-kit';
 
 new BVXWorkerHost().attach(self as never);
 ```
+
+```typescript
+// your application
+import { BVXMesherPool, ChunkNeighbourhoodPacker } from '@astrum-forge/bvx-kit';
+
+const pool = new BVXMesherPool({
+  workers: Array.from({ length: 4 }, () =>
+    new Worker(new URL('./mesher.worker.ts', import.meta.url), { type: 'module' }))
+});
+
+const packer = new ChunkNeighbourhoodPacker();
+
+const response = await pool.submit({
+  id: 0,
+  type: 'quads',
+  payload: {
+    kind: 'neighbourhood',
+    chunk: packer.pack(chunk, world, pool.acquireOccupancy())
+  }
+});
+```
+
+A request carries the chunk and its 26 neighbours as packed occupancy words rather than a serialized snapshot: measured on an M1, packing one costs **1.2 us against BVW1's 17.2**, and the expensive part of the old path ran on the very thread the worker exists to keep free. Over a `SharedArrayBuffer` arena you can go further and send only slot indices, copying nothing - see `VoxelChunkArena`'s concurrency notes for what makes that safe.
+
+### The pool owns no schedule
+
+`BVXMesherPool` has no timer, no frame budget and no deadline. Work moves when you submit it and when a worker reports back, and at no other time - pacing belongs to the application, which is the only party that knows what else is competing for the frame. What the pool gives that pacing is something to act on:
+
+```typescript
+pool.queued;                                   // decide whether to submit more
+pool.cancel(BVXMesherPool.keyOf(request));     // drop work you no longer want
+await pool.drain();                            // wait for everything outstanding
+```
+
+Resubmitting a chunk that is still queued supersedes the queued job rather than adding a second one, so a chunk dirtied three times in a frame is meshed once.
+
+## Compute Shaders
+
+**`GpuSmoothMesher`** contours smooth surfaces with a WebGPU compute pipeline against a device your renderer owns, leaving the geometry on the GPU to be drawn directly. Measured on an M1 at smoothing 2, against the CPU mesher's 241 us per chunk: **8.3x at a batch of eight, 14x at sixty-four**.
+
+It is not a drop-in replacement for the CPU path - it does not implement occluder meshing, its positions are f32 where the CPU's are f64-rounded-once, and it has no degenerate-normal fallback. `supports()` reports the first; the result reports the third. Read the class docs before routing to it.
+
+If you need the vertices back on the CPU rather than drawn, use `CpuSmoothMesher` below roughly 25 chunks: the readback round trip costs more than the contouring saves.
 
 ## BitVoxel Editor
 

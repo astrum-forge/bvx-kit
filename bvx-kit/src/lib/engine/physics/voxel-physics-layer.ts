@@ -1,4 +1,5 @@
 import { MortonKey } from "../../math/morton-key.js";
+import { VoxelChunkArena } from "../chunks/voxel-chunk-arena.js";
 import { VoxelWorld } from "../voxel-world.js";
 import { PhysicsVoxelChunk } from "./physics-voxel-chunk.js";
 import { VoxelPhysics } from "./voxel-physics.js";
@@ -183,6 +184,18 @@ export class VoxelPhysicsLayer {
     private readonly _chunks: Map<number, PhysicsVoxelChunk>;
 
     /**
+     * The arena this layer allocates chunk occupancy from, or null when its chunks
+     * allocate their own. See VoxelPhysics.addLayer.
+     */
+    private readonly _arena: VoxelChunkArena | null;
+
+    /**
+     * Arena slot per chunk, by encoded MortonKey. Only populated when _arena is set -
+     * the arena does not record which chunk holds a slot, so the layer does.
+     */
+    private readonly _slots: Map<number, number>;
+
+    /**
      * Encoded MortonKeys of chunks containing active (possibly moving) grains.
      */
     private readonly _activeChunks: Set<number>;
@@ -213,6 +226,39 @@ export class VoxelPhysicsLayer {
      */
     private _grainTotal = 0;
     private _activeTotal = 0;
+
+    /**
+     * The active chunk list frozen at the start of the tick being swept, bottom-up.
+     * Reused across ticks so a sweep allocates nothing.
+     */
+    private readonly _sweepKeys: number[] = [];
+
+    /**
+     * The tick the current sweep belongs to, or -1 when no sweep is open. A step() call
+     * naming this tick resumes; one naming a different tick starts fresh.
+     */
+    private _resumeTick = -1;
+
+    /**
+     * Index into _sweepKeys to resume the sweep at.
+     */
+    private _resumeChunk = 0;
+
+    /**
+     * The y-plane within that chunk to resume at.
+     */
+    private _resumePlane = 0;
+
+    /**
+     * Grain movements performed by the most recent step().
+     */
+    private _moves = 0;
+
+    /**
+     * The flow layers of the simulation, resolved once per step(). Their dormant grains
+     * are what gate the lateral flow-line wake scans.
+     */
+    private readonly _ctxFlowLayers: VoxelPhysicsLayer[] = [];
 
     /**
      * Cell probes performed by the current sweep - the solver's unit of work.
@@ -270,11 +316,15 @@ export class VoxelPhysicsLayer {
      *
      * @param physics - The coordinating VoxelPhysics instance.
      * @param params - The behaviour parameters for this layer.
+     * @param arena - (Optional) An arena to allocate chunk occupancy from, so another
+     * agent can read this layer's grains directly. See VoxelPhysics.addLayer.
      */
-    constructor(physics: VoxelPhysics, params: VoxelPhysicsParams | null = null) {
+    constructor(physics: VoxelPhysics, params: VoxelPhysicsParams | null = null, arena: VoxelChunkArena | null = null) {
         this._physics = physics;
         this._world = new VoxelWorld();
         this._chunks = new Map<number, PhysicsVoxelChunk>();
+        this._arena = arena;
+        this._slots = new Map<number, number>();
         this._activeChunks = new Set<number>();
         this._dirty = new Set<number>();
 
@@ -292,6 +342,31 @@ export class VoxelPhysicsLayer {
      */
     public get world(): VoxelWorld {
         return this._world;
+    }
+
+    /**
+     * The arena this layer allocates chunk occupancy from, or null when its chunks own
+     * their storage.
+     */
+    public get arena(): VoxelChunkArena | null {
+        return this._arena;
+    }
+
+    /**
+     * The arena slot holding a chunk's occupancy, or -1 when this layer has no arena or
+     * holds no chunk there.
+     *
+     * This is what an arena mesh request needs: the slot list it carries is built from
+     * these, and the layer is the only thing that knows the mapping, because the arena
+     * hands out slots without recording who took them.
+     *
+     * @param key - The encoded MortonKey of the chunk.
+     * @returns - The arena slot, or -1.
+     */
+    public slotOf(key: number): number {
+        const slot: number | undefined = this._slots.get(key);
+
+        return slot !== undefined ? slot : -1;
     }
 
     /**
@@ -528,12 +603,23 @@ export class VoxelPhysicsLayer {
             this._dirty.add(key);
         }
 
-        for (const chunk of this._chunks.values()) {
+        for (const [key, chunk] of this._chunks) {
             this._world.remove(chunk.key);
+
+            const slot: number | undefined = this._slots.get(key);
+
+            if (slot !== undefined && this._arena !== null) {
+                this._arena.release(slot);
+            }
         }
 
         this._chunks.clear();
+        this._slots.clear();
         this._activeChunks.clear();
+        this._sweepKeys.length = 0;
+        this._resumeTick = -1;
+        this._resumeChunk = 0;
+        this._resumePlane = 0;
 
         this._grainTotal = 0;
         this._activeTotal = 0;
@@ -584,23 +670,49 @@ export class VoxelPhysicsLayer {
     }
 
     /**
-     * Advances this layer by one simulation tick. Called by
-     * VoxelPhysics.update() - not intended for direct use, as layers must
-     * step in the coordinator's density order for displacement to behave.
+     * Advances this layer by one simulation tick, or resumes a tick a previous call
+     * left unfinished. Called by VoxelPhysics.update() - not intended for direct use,
+     * as layers must step in the coordinator's density order for displacement to
+     * behave.
+     *
+     * ## Resuming rather than skipping
+     *
+     * A work budget stops the sweep where it runs out and records the position. The
+     * next call to step() with the same tick picks the sweep up at that chunk and that
+     * y-plane, rather than starting the tick again or moving on to the next one.
+     *
+     * That is what makes the budget a pacing control instead of a simulation
+     * parameter. A tick either completes or is continued; it is never partially applied
+     * and then abandoned, so the sequence of grain movements a given world produces is
+     * identical at every budget. Only the number of calls it takes to get there changes.
+     *
+     * Restarting the sweep at y = 0 instead would not be equivalent, even though the
+     * per-tick moved mask stops a grain moving twice: a grain that settles and is then
+     * re-woken by a neighbouring vacancy would be visited a second time in the same
+     * tick, which an unbudgeted sweep never does.
      *
      * @param tick - The global simulation tick counter.
-     * @param maxMoves - (Optional) Stop the sweep once this many grains have moved.
-     * 0 or less means no limit. See VoxelPhysics.update() for the semantics.
-     * @param maxWork - (Optional) Stop the sweep once this many cell probes have
-     * been performed. 0 or less means no limit. This is the budget that actually
-     * bounds a tick's cost - see VoxelPhysics.update().
-     * @returns - The number of grains that moved this tick.
+     * @param maxWork - (Optional) Stop the sweep once this many cell probes have been
+     * performed. 0 or less means no limit.
+     * @returns - Whether the tick finished. False means the budget ran out and the next
+     * call with the same tick resumes it.
      */
-    public step(tick: number, maxMoves = 0, maxWork = 0): number {
+    public step(tick: number, maxWork = 0): boolean {
         this._work = 0;
+        this._moves = 0;
 
-        if (this._activeChunks.size === 0) {
-            return 0;
+        // A tick this layer never started, or one it already finished, begins fresh.
+        if (this._resumeTick !== tick) {
+            this._resumeTick = tick;
+            this._resumeChunk = 0;
+            this._resumePlane = 0;
+            this._Freeze();
+        }
+
+        const keys: number[] = this._sweepKeys;
+
+        if (keys.length === 0) {
+            return true;
         }
 
         const physics: VoxelPhysics = this._physics;
@@ -628,24 +740,28 @@ export class VoxelPhysicsLayer {
         this._ctxMaxY = physics.maxY;
         this._ctxMaxZ = physics.maxZ;
 
-        // sweep chunks bottom-up so grains falling across chunk borders keep
-        // moving one cell every tick with no boundary stalls
-        const keys: number[] = Array.from(this._activeChunks);
-        keys.sort((a, b) => (a & VoxelPhysicsLayer.MORTON_Y_MASK) - (b & VoxelPhysicsLayer.MORTON_Y_MASK));
+        // the flow layers whose dormant grains gate the lateral wake scans, resolved
+        // once per call rather than walked per vacancy
+        this._ctxFlowLayers.length = 0;
 
-        let moves = 0;
+        for (let l = 0; l < layers.length; l++) {
+            if (layers[l]._flow) {
+                this._ctxFlowLayers.push(layers[l]);
+            }
+        }
 
-        for (let i = 0; i < keys.length; i++) {
+        for (let i = this._resumeChunk; i < keys.length; i++) {
             const key: number = keys[i];
             const chunk: PhysicsVoxelChunk | undefined = this._chunks.get(key);
 
             if (!chunk || chunk.activeCount <= 0) {
                 this._activeChunks.delete(key);
+                this._resumePlane = 0;
 
                 continue;
             }
 
-            moves += this._SweepChunk(chunk, tick, maxWork);
+            const stopped: number = this._SweepChunk(chunk, tick, maxWork, this._resumePlane);
 
             // fully dormant chunks leave the active set - empty ones also leave
             // the world so renderers can release their meshes
@@ -653,25 +769,65 @@ export class VoxelPhysicsLayer {
                 this._activeChunks.delete(key);
 
                 if (chunk.length === 0) {
-                    this._world.remove(chunk.key);
-                    this._chunks.delete(key);
+                    this._DropChunk(key, chunk);
                     this._dirty.add(key);
                 }
             }
 
-            // Out of budget. The chunks not reached stay in the active set with their
-            // grains still awake, so the next tick resumes from here - the collapse
-            // takes more ticks rather than one long one.
-            if (maxMoves > 0 && moves >= maxMoves) {
-                break;
+            // Out of budget part-way through this chunk. Record where, so the next call
+            // continues the same tick from the same plane.
+            if (stopped >= 0) {
+                this._resumeChunk = i;
+                this._resumePlane = stopped;
+
+                return false;
             }
 
-            if (maxWork > 0 && this._work >= maxWork) {
-                break;
+            this._resumePlane = 0;
+
+            // Out of budget on a chunk boundary - cheaper to detect here than to enter
+            // the next chunk and immediately leave it.
+            if (maxWork > 0 && this._work >= maxWork && i + 1 < keys.length) {
+                this._resumeChunk = i + 1;
+
+                return false;
             }
         }
 
-        return moves;
+        this._resumeChunk = keys.length;
+        this._sweepKeys.length = 0;
+
+        return true;
+    }
+
+    /**
+     * Returns the grain movements the most recent step() performed.
+     */
+    public get movesPerformed(): number {
+        return this._moves;
+    }
+
+    /**
+     * Freezes the active chunk list for a tick, bottom-up.
+     *
+     * The list is a snapshot: a chunk woken part-way through a tick is swept on the
+     * next one, not this one. That was already true before the sweep became resumable
+     * and is what keeps a tick's work bounded by what was awake when it began.
+     *
+     * Sorting by the interleaved y bits of the MortonKey orders chunks by height
+     * without decoding them, because Morton interleaving preserves per-axis bit order
+     * within the masked subset.
+     */
+    private _Freeze(): void {
+        const keys: number[] = this._sweepKeys;
+
+        keys.length = 0;
+
+        for (const key of this._activeChunks) {
+            keys.push(key);
+        }
+
+        keys.sort((a, b) => (a & VoxelPhysicsLayer.MORTON_Y_MASK) - (b & VoxelPhysicsLayer.MORTON_Y_MASK));
     }
 
     /**
@@ -694,12 +850,53 @@ export class VoxelPhysicsLayer {
             return existing;
         }
 
-        const chunk: PhysicsVoxelChunk = new PhysicsVoxelChunk(key.clone());
+        const arena: VoxelChunkArena | null = this._arena;
+
+        let chunk: PhysicsVoxelChunk;
+
+        if (arena === null) {
+            chunk = new PhysicsVoxelChunk(key.clone());
+        }
+        else {
+            const slot: number = arena.allocate();
+
+            if (slot < 0) {
+                throw new Error(`VoxelPhysicsLayer - the arena backing this layer is full at ${arena.capacity} slots; size it for the region the simulation can reach`);
+            }
+
+            // a recycled slot still holds the previous chunk's grains
+            arena.clear(slot);
+
+            chunk = new PhysicsVoxelChunk(key.clone(), arena.storageAt(slot));
+
+            this._slots.set(key.key, slot);
+        }
 
         this._world.insert(chunk);
         this._chunks.set(key.key, chunk);
 
         return chunk;
+    }
+
+    /**
+     * Drops a chunk and returns its arena slot, if it had one.
+     */
+    private _DropChunk(key: number, chunk: PhysicsVoxelChunk): void {
+        this._world.remove(chunk.key);
+        this._chunks.delete(key);
+
+        const arena: VoxelChunkArena | null = this._arena;
+
+        if (arena === null) {
+            return;
+        }
+
+        const slot: number | undefined = this._slots.get(key);
+
+        if (slot !== undefined) {
+            this._slots.delete(key);
+            arena.release(slot);
+        }
     }
 
     /**
@@ -866,16 +1063,31 @@ export class VoxelPhysicsLayer {
         this._WakeLocal(lx, ly, lz + 1);
         this._WakeLocal(lx, ly, lz - 1);
 
-        // lateral wake propagation for flow layers - the vacancy may sit on the
-        // scan path of a dormant grain (at its own level) or may be the drop
-        // cell a dormant grain one level up can now reach. Skipped entirely
-        // while every flow grain is already awake, as there is nothing to wake.
-        const physics: VoxelPhysics = this._physics;
-        const maxFlow: number = physics.maxFlowDistance;
+        // Lateral wake propagation for flow layers - the vacancy may sit on the scan
+        // path of a dormant grain (at its own level) or may be the drop cell a dormant
+        // grain one level up can now reach. Skipped entirely while every flow grain is
+        // already awake, as there is nothing to wake.
+        //
+        // Asked of the flow layers directly rather than tracked as a tick-scoped flag on
+        // the coordinator. Dormancy is exactly grainCount > activeCount, so a live check
+        // over the one to three flow layers is both cheaper than the round trip and
+        // strictly more precise than a sticky flag - it goes false again the moment the
+        // last dormant grain wakes, instead of at the end of the tick.
+        const maxFlow: number = this._physics.maxFlowDistance;
 
-        if (maxFlow > 1 && physics.flowWakeNeeded) {
-            this._WakeFlowLines(lx, ly, lz, maxFlow);
-            this._WakeFlowLines(lx, ly + 1, lz, maxFlow);
+        if (maxFlow <= 1) {
+            return;
+        }
+
+        const flowLayers: VoxelPhysicsLayer[] = this._ctxFlowLayers;
+
+        for (let l = 0; l < flowLayers.length; l++) {
+            if (flowLayers[l].hasDormantGrains) {
+                this._WakeFlowLines(lx, ly, lz, maxFlow);
+                this._WakeFlowLines(lx, ly + 1, lz, maxFlow);
+
+                return;
+            }
         }
     }
 
@@ -1158,8 +1370,15 @@ export class VoxelPhysicsLayer {
     /**
      * Simulates one tick for a single chunk - the solver's hot loop. Sweeps
      * bottom-up over the active grains, moving each at most one cell.
+     *
+     * @param chunk - The chunk to sweep.
+     * @param tick - The simulation tick.
+     * @param workLimit - The cell-probe budget, or 0 for none.
+     * @param startPlane - The y-plane to begin at, so a budgeted sweep resumes
+     * exactly where the previous call stopped.
+     * @returns - -1 when the chunk finished, otherwise the y-plane to resume at.
      */
-    private _SweepChunk(chunk: PhysicsVoxelChunk, tick: number, workLimit: number): number {
+    private _SweepChunk(chunk: PhysicsVoxelChunk, tick: number, workLimit: number, startPlane: number): number {
         const chunkKey: MortonKey = chunk.key;
 
         this._ctxChunkX = chunkKey.x;
@@ -1193,19 +1412,16 @@ export class VoxelPhysicsLayer {
         const slide: boolean = this._slide;
         const flow: boolean = this._flow;
 
-        let moves = 0;
-
         // bottom-up so a falling column compacts together within one tick. Only
         // words containing active plane bits are visited - dormant regions are
         // skipped at word granularity.
-        for (let y = 0; y < 16; y++) {
-            // Out of work budget mid-chunk. Every grain not reached still has its
-            // active bit set, so it is swept by the next tick - the chunk simply
-            // stays in the active set. Checked per y-plane rather than per grain:
-            // sixteen comparisons a chunk is free, and a plane is a small enough
-            // slice that no single one can overrun the budget by much.
+        for (let y = startPlane; y < 16; y++) {
+            // Out of work budget mid-chunk. Report the plane so the next call picks the
+            // same tick up here rather than restarting it. Checked per y-plane rather
+            // than per grain: sixteen comparisons a chunk is free, and a plane is a
+            // small enough slice that no single one can overrun the budget by much.
             if (workLimit > 0 && this._work >= workLimit) {
-                break;
+                return y;
             }
 
             const planeBase: number = (y >> 2) * 32;
@@ -1240,7 +1456,7 @@ export class VoxelPhysicsLayer {
                     // 1) fall straight down
                     if (this._IsOpen(x, y - 1, z)) {
                         this._MoveGrain(chunk, x, y, z, x, y - 1, z);
-                        moves++;
+                        this._moves++;
 
                         continue;
                     }
@@ -1250,7 +1466,7 @@ export class VoxelPhysicsLayer {
 
                     if (lighter >= 0) {
                         this._SwapGrain(chunk, lighter, x, y, z, x, y - 1, z);
-                        moves++;
+                        this._moves++;
 
                         continue;
                     }
@@ -1277,7 +1493,7 @@ export class VoxelPhysicsLayer {
                     }
 
                     if (didMove) {
-                        moves++;
+                        this._moves++;
 
                         continue;
                     }
@@ -1291,7 +1507,7 @@ export class VoxelPhysicsLayer {
                     }
 
                     if (didMove) {
-                        moves++;
+                        this._moves++;
 
                         continue;
                     }
@@ -1300,16 +1516,10 @@ export class VoxelPhysicsLayer {
                     activeElements[word] &= ~mask;
                     chunk.activeCount--;
                     this._activeTotal--;
-
-                    // a newly dormant flow grain requires flow-line wakes for
-                    // the remainder of this tick
-                    if (flow) {
-                        this._physics.notifyFlowSettled();
-                    }
                 }
             }
         }
 
-        return moves;
+        return -1;
     }
 }

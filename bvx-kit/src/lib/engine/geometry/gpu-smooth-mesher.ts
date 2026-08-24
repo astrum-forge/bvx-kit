@@ -44,14 +44,21 @@ export interface GpuSmoothMeshHandle {
 export interface GpuSmoothMesherOptions {
     /**
      * How many chunks the mesher sizes its scratch for, and therefore the most
-     * it will contour in one submission.
-     *
-     * The measured cost model says batching is the whole game: a dispatch carries
-     * a fixed submission cost of roughly a tenth of a millisecond on Apple
-     * Silicon, so a batch of one loses to the CPU outright while a batch of
-     * sixty-four wins comfortably. Scratch is about 0.5 MB per chunk.
+     * it will contour in one submission. Scratch is about 0.5 MB per chunk.
      */
     readonly capacity?: number;
+
+    /**
+     * How many workgroups each chunk gets for the data-parallel passes. Defaults to 16.
+     *
+     * The shader grid-strides within a tile, so this only changes how the work is
+     * spread, never the result. It matters at small batches, where one workgroup per
+     * chunk leaves the device almost idle: measured on an M1 at smoothing 2, 16 tiles
+     * is worth 2.2x at a batch of one and 1.3x at eight, and nothing by 32, where the
+     * batch alone already saturates. Values above 54 cannot help - that is one thread
+     * per field sample.
+     */
+    readonly tiles?: number;
 }
 
 /**
@@ -59,22 +66,67 @@ export interface GpuSmoothMesherOptions {
  *
  * ## What it does and does not accept
  *
- * It contours a chunk against its 26 neighbours with the same field, the same
- * blur and the same surface-nets rules as the CPU, and leaves the result on the
- * device. It does NOT implement occluder meshing - the merged-field ownership
- * modes and the vertex compaction they need are not ported. `supports()` reports
- * false for those, and a caller holding a CpuSmoothMesher should route them
- * there. This is a real limitation, not a temporary one to be assumed away: the
- * reference editor uses occluders on every lane, so today this path serves
- * standalone chunks only.
+ * It contours a chunk against its 26 neighbours with the same field, the same blur and
+ * the same surface-nets rules as the CPU, and leaves the result on the device.
+ *
+ * It does **not** implement occluder meshing - the merged-field ownership modes and the
+ * vertex compaction they need are not ported. `supports()` reports false for those, and
+ * a caller holding a CpuSmoothMesher should route them there.
+ *
+ * Two further differences from the CPU reference, both measured rather than assumed:
+ *
+ * - **Positions are f32 throughout.** The CPU computes a vertex position in f64 and
+ *   rounds once on the store. Topology is identical - vertex count, index count and the
+ *   set of triangles match exactly at every smoothing level - but about 5% of vertex
+ *   components differ, by at most 4.8e-7 units against a 0.25-unit BitVoxel.
+ * - **There is no degenerate-normal fallback.** A dual cell whose field gradient is zero
+ *   gets a zero normal here; the CPU resolves it from the adjacent triangles. The result
+ *   reports how many such vertices a chunk produced, in `degenerateNormals`, so a
+ *   renderer can detect the case rather than discover it visually. On terrain-shaped
+ *   data it does not arise; two diagonally opposite solid corners with nothing else in
+ *   the cell is what triggers it.
  *
  * ## Why it takes a device rather than making one
  *
- * The output is meant to be drawn, not read back - a readback round trip
- * measured 0.32 ms for sixteen bytes on this hardware, which is more than the
- * contouring saves. Drawing it means the renderer's device must own it, so the
- * caller passes the device in. That also keeps the kit free of any WebGPU
- * runtime dependency: nothing here touches navigator.gpu.
+ * The output is meant to be drawn, not read back - a readback round trip measured
+ * 0.32 ms for sixteen bytes on Apple Silicon, regardless of payload size, which is more
+ * than the contouring saves below roughly 25 chunks. Drawing it means the renderer's
+ * device must own it, so the caller passes the device in. That also keeps the kit free
+ * of any WebGPU runtime dependency: nothing here touches navigator.gpu.
+ *
+ * ## When it is worth using
+ *
+ * Two costs, and they behave differently. Measured on an M1 at smoothing 2, against the
+ * CPU mesher's 241 us per chunk.
+ *
+ * **The contouring itself**, amortised over many submissions so per-call latency does
+ * not dominate the measurement:
+ *
+ * | chunks per submission | 1 | 2 | 4 | 8 | 16 | 32 | 64 |
+ * | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+ * | us per chunk | 140 | 76 | 46 | 29 | 20 | 17 | 17 |
+ * | speedup vs CPU | 1.7x | 3.2x | 5.3x | 8.3x | 12x | 14x | 14x |
+ *
+ * Batching is still worth a lot, but the old advice that a batch of one "loses to the
+ * CPU by roughly six times" no longer holds - that was a property of the one-workgroup-
+ * per-chunk dispatch this no longer uses.
+ *
+ * **The call around it** adds a fixed cost that batching amortises and nothing else
+ * reduces: staging and uploading the neighbourhoods runs about 10 us per chunk on the
+ * calling thread, and submitting the work and awaiting the 16-bytes-per-chunk counts
+ * readback costs roughly 0.3 ms per call whatever the batch size. At 64 chunks that is
+ * noise; at one chunk it is the whole call.
+ *
+ * So `meshBatch` is worth using in proportion to how many chunks go into one call, and a
+ * caller submitting one chunk at a time is measuring the round trip rather than the
+ * mesher. Two further consequences worth knowing:
+ *
+ * - **A caller who needs the vertices back on the CPU should use CpuSmoothMesher below
+ *   roughly 25 chunks.** The readback round trip costs more than the contouring saves.
+ * - **One instance cannot overlap itself.** Every call writes the same scratch, so a
+ *   second `meshBatch` cannot be submitted until the first resolves. An application that
+ *   wants the GPU contouring while the CPU reads the previous counts should hold two
+ *   instances and alternate between them.
  */
 export class GpuSmoothMesher implements SmoothMesher {
     public readonly id: string = "webgpu";
@@ -83,17 +135,27 @@ export class GpuSmoothMesher implements SmoothMesher {
     /**
      * Field, cell and output sizes, mirroring VoxelSmoothGeometry's own.
      */
-    private static readonly FIELD_DIMS: number = 24;
     private static readonly FIELD_SIZE: number = 24 * 24 * 24;
     private static readonly MAX_CELLS: number = 17 * 17 * 17;
     private static readonly MAX_INDICES: number = 3 * 17 * 16 * 16 * 6;
     private static readonly DESC_STRIDE: number = 32;
 
     /**
+     * Words of per-chunk output the shader reports: vertex count, index count,
+     * degenerate-normal count, and one spare that keeps the stride 16-byte aligned.
+     */
+    private static readonly COUNT_WORDS: number = 4;
+
+    /**
      * The shader declares its descriptor array at a fixed length, so a batch
      * cannot exceed it.
      */
     public static readonly MAX_BATCH: number = 64;
+
+    /**
+     * The most workgroups per chunk that can do any work - one thread per field sample.
+     */
+    public static readonly MAX_TILES: number = Math.ceil((24 * 24 * 24) / 256);
 
     /**
      * One scratch buffer serves the blur ping-pong and the per-cell vertex data;
@@ -104,7 +166,10 @@ export class GpuSmoothMesher implements SmoothMesher {
 
     private readonly _device: GPUDevice;
     private readonly _capacity: number;
+    private readonly _tiles: number;
 
+    private readonly _module: GPUShaderModule;
+    private readonly _pipelineLayout: GPUPipelineLayout;
     private readonly _pipelines: Map<string, GPUComputePipeline>;
     private readonly _layout: GPUBindGroupLayout;
     private readonly _bindGroup: GPUBindGroup;
@@ -127,6 +192,7 @@ export class GpuSmoothMesher implements SmoothMesher {
      */
     private readonly _occupancyStage: Uint32Array<ArrayBuffer>;
     private readonly _descStage: Int32Array<ArrayBuffer>;
+    private readonly _paramStage: Uint32Array<ArrayBuffer>;
     private readonly _scratchKey: MortonKey;
 
     constructor(device: GPUDevice, options: GpuSmoothMesherOptions = {}) {
@@ -134,14 +200,13 @@ export class GpuSmoothMesher implements SmoothMesher {
 
         this._device = device;
         this._capacity = capacity;
+        this._tiles = Math.min(GpuSmoothMesher.MAX_TILES, Math.max(1, options.tiles ?? 16));
         this._scratchKey = new MortonKey();
         this._pipelines = new Map<string, GPUComputePipeline>();
 
-        const module: GPUShaderModule = device.createShaderModule({ code: SMOOTH_MESHER_WGSL, label: "bvx-smooth-mesher" });
+        this._module = device.createShaderModule({ code: SMOOTH_MESHER_WGSL, label: "bvx-smooth-mesher" });
 
         // Every pass shares one explicit layout so one bind group serves them all.
-        // Ten storage bindings is exactly the portable floor for a compute stage,
-        // which is why the field and the cell data are packed rather than split.
         const entries: GPUBindGroupLayoutEntry[] = [
             { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
             { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
@@ -153,34 +218,26 @@ export class GpuSmoothMesher implements SmoothMesher {
         }
 
         this._layout = device.createBindGroupLayout({ entries: entries, label: "bvx-smooth-layout" });
-
-        const pipelineLayout: GPUPipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [this._layout] });
-
-        for (const entryPoint of ["sample_field", "blur_x", "blur_y", "blur_z", "copy_back", "mark_cells", "scan_cells", "emit_quads"]) {
-            this._pipelines.set(entryPoint, device.createComputePipeline({
-                layout: pipelineLayout,
-                compute: { module: module, entryPoint: entryPoint },
-                label: `bvx-smooth-${entryPoint}`
-            }));
-        }
+        this._pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [this._layout] });
 
         const storage: number = GPUBufferUsage.STORAGE;
         const copyDst: number = GPUBufferUsage.COPY_DST;
 
-        // The chunk plus its 26 neighbours, per batched chunk. Uploaded rather
-        // than shared, because WebGPU never maps a SharedArrayBuffer directly.
+        // The chunk plus its 26 neighbours, per batched chunk. Uploaded rather than
+        // shared: queue.writeBuffer does accept a SharedArrayBuffer-backed view, but
+        // the arena's chunks are scattered rather than contiguous, so they have to be
+        // gathered somewhere regardless.
         const occupancyWords: number = capacity * 27 * (BVXLayer.BYTE_LENGTH / 4);
 
         this._occupancyStage = new Uint32Array(occupancyWords);
         this._descStage = new Int32Array(GpuSmoothMesher.MAX_BATCH * GpuSmoothMesher.DESC_STRIDE);
+        this._paramStage = new Uint32Array(4);
 
         this._params = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | copyDst, label: "bvx-smooth-params" });
         this._occupancy = device.createBuffer({ size: occupancyWords * 4, usage: storage | copyDst, label: "bvx-smooth-occupancy" });
         this._desc = device.createBuffer({ size: this._descStage.byteLength, usage: GPUBufferUsage.UNIFORM | copyDst, label: "bvx-smooth-desc" });
 
-        const fieldBytes: number = capacity * GpuSmoothMesher.FIELD_SIZE * 4;
-
-        this._field = device.createBuffer({ size: fieldBytes, usage: storage, label: "bvx-smooth-field" });
+        this._field = device.createBuffer({ size: capacity * GpuSmoothMesher.FIELD_SIZE * 4, usage: storage, label: "bvx-smooth-field" });
         this._scratch = device.createBuffer({ size: capacity * GpuSmoothMesher.SCRATCH_STRIDE * 4, usage: storage, label: "bvx-smooth-scratch" });
         this._cellSlot = device.createBuffer({ size: capacity * GpuSmoothMesher.MAX_CELLS * 4, usage: storage, label: "bvx-smooth-cellslot" });
 
@@ -202,13 +259,15 @@ export class GpuSmoothMesher implements SmoothMesher {
             label: "bvx-smooth-indices"
         });
 
+        const countBytes: number = capacity * GpuSmoothMesher.COUNT_WORDS * 4;
+
         this._counts = device.createBuffer({
-            size: capacity * 2 * 4,
+            size: countBytes,
             usage: storage | GPUBufferUsage.COPY_SRC | copyDst,
             label: "bvx-smooth-counts"
         });
         this._countsRead = device.createBuffer({
-            size: capacity * 2 * 4,
+            size: countBytes,
             usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
             label: "bvx-smooth-counts-read"
         });
@@ -239,6 +298,13 @@ export class GpuSmoothMesher implements SmoothMesher {
     }
 
     /**
+     * The workgroups per chunk the data-parallel passes are dispatched with.
+     */
+    public get tiles(): number {
+        return this._tiles;
+    }
+
+    /**
      * Occluder meshing is not implemented on this path - the merged-field
      * ownership modes and the vertex compaction they require are absent, and a
      * silently different surface is worse than a routed one.
@@ -259,13 +325,54 @@ export class GpuSmoothMesher implements SmoothMesher {
 
     /**
      * Contours one chunk. Prefer meshBatch for more than one - a single-chunk
-     * submission pays the whole fixed dispatch cost for one chunk's work and
-     * loses to the CPU by roughly six times.
+     * submission pays the whole fixed dispatch cost for one chunk's work.
      */
     public async mesh(request: SmoothMeshRequest): Promise<SmoothMeshResult> {
         const results: SmoothMeshResult[] = await this.meshBatch([request]);
 
         return results[0];
+    }
+
+    /**
+     * The ordered list of pass entry points for a smoothing level.
+     *
+     * Three axis passes flip which buffer holds the field, so the direction alternates
+     * and `copy_back` appears only when the number of triples is odd. Pairs of smoothing
+     * passes collapse into one triple of fused 5-taps.
+     *
+     * @param smoothing - The clamped smoothing level.
+     * @returns - The entry points, in dispatch order.
+     */
+    public static passList(smoothing: number): string[] {
+        const list: string[] = ["sample_field"];
+
+        let inField = true;
+        let remaining: number = smoothing;
+
+        while (remaining >= 2) {
+            list.push(inField ? "blur2_x" : "blur2_x_r");
+            list.push(inField ? "blur2_y" : "blur2_y_r");
+            list.push(inField ? "blur2_z" : "blur2_z_r");
+
+            inField = !inField;
+            remaining -= 2;
+        }
+
+        if (remaining === 1) {
+            list.push(inField ? "blur_x" : "blur_x_r");
+            list.push(inField ? "blur_y" : "blur_y_r");
+            list.push(inField ? "blur_z" : "blur_z_r");
+
+            inField = !inField;
+        }
+
+        if (!inField) {
+            list.push("copy_back");
+        }
+
+        list.push("mark_cells", "scan_cells", "emit_quads");
+
+        return list;
     }
 
     /**
@@ -287,65 +394,64 @@ export class GpuSmoothMesher implements SmoothMesher {
         const count: number = requests.length;
         const smoothing: number = Math.min(Math.max(requests[0].smoothing | 0, 0), VoxelSmoothGeometry.MAX_SMOOTHING);
         const margin: number = 1 + smoothing;
+        const countBytes: number = count * GpuSmoothMesher.COUNT_WORDS * 4;
 
         this._stage(requests, count);
 
+        this._paramStage[0] = count;
+        this._paramStage[1] = margin;
+        this._paramStage[2] = BVXLayer.DIMS + (2 * margin);
+        this._paramStage[3] = requests[0].flipped ? 1 : 0;
+
         device.queue.writeBuffer(this._occupancy, 0, this._occupancyStage, 0, count * 27 * (BVXLayer.BYTE_LENGTH / 4));
         device.queue.writeBuffer(this._desc, 0, this._descStage);
-        device.queue.writeBuffer(this._params, 0, new Uint32Array([
-            count,
-            margin,
-            BVXLayer.DIMS + (2 * margin),
-            requests[0].flipped ? 1 : 0
-        ]));
+        device.queue.writeBuffer(this._params, 0, this._paramStage);
 
         const encoder: GPUCommandEncoder = device.createCommandEncoder({ label: "bvx-smooth" });
 
-        encoder.clearBuffer(this._counts, 0, count * 2 * 4);
+        encoder.clearBuffer(this._counts, 0, countBytes);
 
         const pass: GPUComputePassEncoder = encoder.beginComputePass({ label: "bvx-smooth-pass" });
 
         pass.setBindGroup(0, this._bindGroup);
 
-        this._dispatch(pass, "sample_field", count);
+        // WebGPU makes each dispatch its own synchronisation scope, so consecutive
+        // dispatches in one pass that share a storage buffer are ordered as if they ran
+        // serially. No manual barrier is needed between the stages below.
+        for (const entryPoint of GpuSmoothMesher.passList(smoothing)) {
+            pass.setPipeline(this._pipeline(entryPoint));
 
-        // Three axis passes then a copy back, exactly as the CPU ping-pongs, so
-        // the arithmetic and therefore the result are identical.
-        for (let i = 0; i < smoothing; i++) {
-            this._dispatch(pass, "blur_x", count);
-            this._dispatch(pass, "blur_y", count);
-            this._dispatch(pass, "blur_z", count);
-            this._dispatch(pass, "copy_back", count);
+            // scan_cells synchronises through workgroup memory, so its chunk must sit in
+            // a single workgroup; every other pass grid-strides across the tiles.
+            pass.dispatchWorkgroups(entryPoint === "scan_cells" ? 1 : this._tiles, count);
         }
-
-        this._dispatch(pass, "mark_cells", count);
-        this._dispatch(pass, "scan_cells", count);
-        this._dispatch(pass, "emit_quads", count);
 
         pass.end();
 
         // The counts are the one thing that must come back: a draw needs its index
-        // count on the CPU. It is 8 bytes per chunk, and it is the only readback
+        // count on the CPU. It is 16 bytes per chunk, and it is the only readback
         // in the pipeline - the geometry itself never crosses.
-        encoder.copyBufferToBuffer(this._counts, 0, this._countsRead, 0, count * 2 * 4);
+        encoder.copyBufferToBuffer(this._counts, 0, this._countsRead, 0, countBytes);
 
         device.queue.submit([encoder.finish()]);
 
-        await this._countsRead.mapAsync(GPUMapMode.READ, 0, count * 2 * 4);
+        await this._countsRead.mapAsync(GPUMapMode.READ, 0, countBytes);
 
-        const counts: Uint32Array = new Uint32Array(this._countsRead.getMappedRange(0, count * 2 * 4).slice(0));
+        const counts: Uint32Array = new Uint32Array(this._countsRead.getMappedRange(0, countBytes).slice(0));
 
         this._countsRead.unmap();
 
         const results: SmoothMeshResult[] = [];
+        const stride: number = GpuSmoothMesher.COUNT_WORDS;
 
         for (let i = 0; i < count; i++) {
-            const indexCount: number = Math.min(counts[(i * 2) + 1], GpuSmoothMesher.MAX_INDICES);
+            const indexCount: number = Math.min(counts[(i * stride) + 1], GpuSmoothMesher.MAX_INDICES);
 
             results.push({
                 residency: "gpu",
-                vertexCount: counts[i * 2],
+                vertexCount: counts[i * stride],
                 indexCount: indexCount,
+                degenerateNormals: counts[(i * stride) + 2],
                 vertices: null,
                 normals: null,
                 indices: null,
@@ -379,11 +485,25 @@ export class GpuSmoothMesher implements SmoothMesher {
     }
 
     /**
-     * Records one pass, one workgroup per chunk.
+     * Returns the pipeline for an entry point, creating it on first use. Smoothing 0
+     * never touches a blur pipeline and should not pay to compile six of them.
      */
-    private _dispatch(pass: GPUComputePassEncoder, entryPoint: string, count: number): void {
-        pass.setPipeline(this._pipelines.get(entryPoint)!);
-        pass.dispatchWorkgroups(count);
+    private _pipeline(entryPoint: string): GPUComputePipeline {
+        const existing: GPUComputePipeline | undefined = this._pipelines.get(entryPoint);
+
+        if (existing !== undefined) {
+            return existing;
+        }
+
+        const pipeline: GPUComputePipeline = this._device.createComputePipeline({
+            layout: this._pipelineLayout,
+            compute: { module: this._module, entryPoint: entryPoint },
+            label: `bvx-smooth-${entryPoint}`
+        });
+
+        this._pipelines.set(entryPoint, pipeline);
+
+        return pipeline;
     }
 
     /**

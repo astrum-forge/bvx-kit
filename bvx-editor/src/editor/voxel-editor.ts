@@ -17,7 +17,10 @@ import {
 import { BVX_AO_KIND, GhibliToonPlugin, GhibliWaterPlugin } from "./ghibli";
 import { createRenderStack, type RenderStack } from "./render-stack";
 import {
+    BVXMesherPool,
     BVXSerializer,
+    MesherPoolError,
+    ChunkNeighbourhoodPacker,
     MortonKey,
     VoxelChunk0,
     VoxelChunk16,
@@ -25,12 +28,12 @@ import {
     VoxelPhysics,
     VoxelPhysicsLayer,
     VoxelWorld,
+    type ChunkNeighbourhood,
     type SmoothOcclusionMode,
     type VoxelChunk
-} from "@astrumforge/bvx-kit";
-import type { EditorMeshRequest, EditorMeshResponse, BlockyMeshResponse } from "./mesh-protocol";
+} from "@astrum-forge/bvx-kit";
+import { editorRequestTransferables, type EditorMeshRequest, type EditorMeshResponse, type BlockyMeshResponse } from "./mesh-protocol";
 import { BIT_VOXEL_SIZE } from "./units";
-import { MesherPool } from "./mesher-pool";
 import { PALETTE } from "./palette";
 
 /**
@@ -62,6 +65,24 @@ export interface EditorStats {
     bitVoxels: number;
     triangles: number;
     workers: number;
+
+    /**
+     * The mesher pool's backlog - requests it holds that have not been posted to a
+     * worker, and requests a worker is currently meshing.
+     *
+     * Read straight off BVXMesherPool rather than counted here. The pool is the only
+     * thing that knows, now that it owns the queue, and a caller pacing its own frame
+     * needs to see the depth it is feeding.
+     */
+    meshQueued: number;
+    meshInFlight: number;
+
+    /**
+     * Chunks the editor has marked dirty but not yet packed into a request, across
+     * every lane. This is the editor's own queue in front of the pool's.
+     */
+    meshPending: number;
+
     sandGrains: number;
     waterGrains: number;
     activeGrains: number;
@@ -138,24 +159,22 @@ interface MeshLane {
     capacity: Map<number, { vertices: number, indices: number }>;
 
     /**
-     * Chunks that want a remesh but have not been sent to a worker yet.
+     * Chunks that want a remesh but have not been handed to the pool yet.
      *
-     * Nothing is serialized when a chunk is queued - only when the frame's
-     * meshing budget reaches it. That is the point: a physics tick can dirty
-     * over a hundred chunks at once, and each request costs about 0.17 ms of
-     * synchronous serialization on this thread, so honouring a whole drain
-     * immediately is a twenty-millisecond stall. Queueing also coalesces - a
-     * chunk dirtied on three successive ticks before the budget reaches it is
-     * serialized once, from its latest state.
+     * Nothing is packed when a chunk is queued - only when the frame's meshing budget
+     * reaches it. Building a request is much cheaper than it was (packing a
+     * neighbourhood is ~1.2 us against BVW1's 17.2), but it is not free: a physics tick
+     * can dirty over a hundred chunks at once, and each one also has to gather and merge
+     * its occluder neighbourhood. Queueing bounds that per frame and coalesces - a chunk
+     * dirtied on three successive ticks before the budget reaches it is packed once,
+     * from its latest state.
+     *
+     * This is the only mesh bookkeeping the editor still keeps. In-flight tracking and
+     * the re-dirtied "latest wins" dance are gone: BVXMesherPool coalesces a
+     * resubmission against its own queue and answers the superseded caller with the
+     * survivor's result.
      */
     pending: Set<number>;
-
-    /**
-     * Meshing bookkeeping - chunks with a request in flight and chunks that
-     * were re-dirtied while their request was still running (latest-wins).
-     */
-    inFlight: Set<number>;
-    dirtyAgain: Set<number>;
 
     /**
      * Flat vertex colour for the lane, or null to colour from voxel meta-data
@@ -222,7 +241,7 @@ const PHYSICS_MAX_TICKS_PER_FRAME = 4;
  * tick can take tens of milliseconds and drop a frame.
  *
  * This is a wall-clock budget, converted per tick into the kit's work budget -
- * VoxelPhysics.update's maxWork, denominated in cell probes. Not its move budget,
+ * VoxelPhysics.update's maxWork, denominated in cell probes. Not a move budget,
  * which does not bound the cost: a grain that FAILS to move is not a move but
  * still pays for the probes that discovered it cannot, and for water that search
  * is the most expensive thing the solver does. Measured over a collapsing lake,
@@ -273,6 +292,18 @@ const PHYSICS_WORK_PER_MS = 30000;
  * in full either way, just over more frames.
  */
 const MESH_FRAME_BUDGET_MS = 4.0;
+
+/**
+ * How deep the pool's own queue may get before this frame stops packing more.
+ *
+ * The pool dispatches `workers * inFlightPerWorker` requests at a time and holds the
+ * rest. A few waiting is what keeps the workers busy across a response gap; a hundred
+ * waiting is a hundred packed neighbourhoods going stale, each pinning a 13.8 KB
+ * occupancy buffer, for chunks the simulation has probably dirtied again by the time a
+ * worker reaches them. Past this the editor keeps them in `lane.pending` instead, where
+ * re-dirtying them costs nothing and they are packed from their latest state.
+ */
+const MESH_POOL_QUEUE_LIMIT = 16;
 const MESH_APPLY_BUDGET_MS = 2.5;
 
 /**
@@ -386,7 +417,18 @@ export class VoxelEditor {
     private readonly _scene: Scene;
 
     private readonly _camera: ArcRotateCamera;
-    private readonly _pool: MesherPool;
+    private readonly _pool: BVXMesherPool<EditorMeshRequest, EditorMeshResponse>;
+
+    /**
+     * Packs a chunk and its 26 neighbours for a mesh request. Reused - it is scratch.
+     */
+    private readonly _packer: ChunkNeighbourhoodPacker;
+
+    /**
+     * The 27-chunk world the occluding lanes are gathered into before packing. Reused
+     * across requests and sized for what it actually holds.
+     */
+    private readonly _occluderRegion: VoxelWorld = new VoxelWorld(32);
     private readonly _resizeObserver: ResizeObserver;
 
     // lights, shadows, ground, sky and the post chain
@@ -555,7 +597,18 @@ export class VoxelEditor {
         this._canvas = canvas;
         this._engine = engine;
         this._scene = new Scene(this._engine);
-        this._pool = new MesherPool();
+        this._packer = new ChunkNeighbourhoodPacker();
+
+        // The pool is the kit's, driven entirely from here: it owns no timer and no
+        // budget, so the frame pacing below is still the only thing deciding when work
+        // moves. It does own coalescing, cancellation and buffer recycling, which this
+        // file used to approximate with a latest-wins check on the response.
+        this._pool = new BVXMesherPool<EditorMeshRequest, EditorMeshResponse>({
+            workers: Array.from(
+                { length: Math.min(4, Math.max(1, (navigator.hardwareConcurrency || 4) - 1)) },
+                () => new Worker(new URL("./mesher.worker.ts", import.meta.url), { type: "module" })),
+            transferables: editorRequestTransferables
+        });
 
         const scene = this._scene;
 
@@ -863,7 +916,10 @@ export class VoxelEditor {
         let work = 0;
         let elapsed = 0;
 
-        while (this._physicsAccumulator >= tickMillis && ticks < PHYSICS_MAX_TICKS_PER_FRAME) {
+        // A tick the previous frame's budget cut short is finished first, whatever the
+        // accumulator says - it has already been partly applied, and leaving it open
+        // while waiting for time to accumulate would stall the solver mid-tick.
+        while ((this._physics.tickInProgress || this._physicsAccumulator >= tickMillis) && ticks < PHYSICS_MAX_TICKS_PER_FRAME) {
             // Convert what is left of the frame's wall-clock budget into a probe
             // cap, at the rate this machine has been managing. Never below a
             // floor: a tick allowed no work cannot make progress, and a stalled
@@ -871,18 +927,24 @@ export class VoxelEditor {
             const remaining = Math.max(0.5, PHYSICS_BUDGET_MS - elapsed);
             const allowance = Math.max(20000, Math.round(remaining * this._workPerMs));
 
-            moves += this._physics.update(1, 0, allowance);
-            work += this._sand.workPerformed + this._water.workPerformed;
+            const result = this._physics.update(1, allowance);
 
-            this._physicsAccumulator -= tickMillis;
-            ticks++;
+            moves += result.moves;
+            work += result.work;
+
+            // Only a tick that actually completed draws down the accumulator. A tick the
+            // budget cut short is resumed by the next call rather than skipped, so
+            // counting it here would run the simulation slow by exactly the number of
+            // interruptions.
+            this._physicsAccumulator -= tickMillis * result.ticks;
+            ticks += result.ticks;
 
             elapsed = performance.now() - started;
 
             // the tick ran out of budget with work outstanding, or the frame's
             // time is spent - stop here and let the next frame carry on rather
             // than blowing through the frame time
-            if (this._physics.budgetExceeded || elapsed >= PHYSICS_BUDGET_MS) {
+            if (!result.complete || elapsed >= PHYSICS_BUDGET_MS) {
                 break;
             }
         }
@@ -1359,8 +1421,6 @@ export class VoxelEditor {
             triangles: new Map<number, number>(),
             capacity: new Map<number, { vertices: number, indices: number }>(),
             pending: new Set<number>(),
-            inFlight: new Set<number>(),
-            dirtyAgain: new Set<number>(),
             color: color,
             material: material,
             wireMaterial: wireMaterial,
@@ -1418,8 +1478,6 @@ export class VoxelEditor {
             lane.triangles.clear();
             lane.capacity.clear();
             lane.pending.clear();
-            lane.inFlight.clear();
-            lane.dirtyAgain.clear();
         }
 
         // Responses still in the apply queue belong to the world being replaced,
@@ -1436,8 +1494,17 @@ export class VoxelEditor {
 
     /**
      * Queues a remesh for every chunk in every lane.
+     *
+     * Every caller reaches here because the whole meshed set is stale - the render mode
+     * changed, the smoothing level changed, or the world was replaced - so anything the
+     * pool has queued is work for a state that no longer exists. Dropping it is free and
+     * saves the workers from meshing it. Requests already posted to a worker cannot be
+     * recalled; those still come back and are discarded by the render-mode check in
+     * _applyMeshResponse.
      */
     private _remeshAll(): void {
+        this._pool.cancelAll();
+
         for (const lane of this._lanes) {
             const keys = this._laneMeshKeys(lane);
 
@@ -2327,6 +2394,12 @@ export class VoxelEditor {
         // lane - the one actually moving - would never be reached.
         const offset = this._pumpCursor++ % laneCount;
 
+        // The pool already has more waiting than it can start soon. Packing more would
+        // trade fresh data for stale and pin buffers for it.
+        if (this._pool.queued >= MESH_POOL_QUEUE_LIMIT) {
+            return;
+        }
+
         let sent = 0;
 
         for (let l = 0; l < laneCount; l++) {
@@ -2336,21 +2409,13 @@ export class VoxelEditor {
                 continue;
             }
 
-            // Iterated and deleted in place, no snapshot. Deleting the current
-            // entry of a Set under iteration is well defined, and nothing on this
-            // path inserts: in-flight chunks are skipped before _requestMesh is
-            // called, so its re-queue branch is unreachable from here. Copying
-            // instead would allocate an array the size of the whole queue every
-            // frame to service a dozen of its entries.
+            // Iterated and deleted in place, no snapshot. Deleting the current entry
+            // of a Set under iteration is well defined, and nothing on this path
+            // inserts. Copying instead would allocate an array the size of the whole
+            // queue every frame to service a dozen of its entries.
             for (const chunkKey of lane.pending) {
-                if (performance.now() - started >= MESH_FRAME_BUDGET_MS) {
+                if (performance.now() - started >= MESH_FRAME_BUDGET_MS || this._pool.queued >= MESH_POOL_QUEUE_LIMIT) {
                     return;
-                }
-
-                // still being meshed - leave it queued, the response handler
-                // will pick it up again
-                if (lane.inFlight.has(chunkKey)) {
-                    continue;
                 }
 
                 lane.pending.delete(chunkKey);
@@ -2365,17 +2430,14 @@ export class VoxelEditor {
     }
 
     /**
-     * Sends a meshing request for a chunk of the provided lane. If a request
-     * for the chunk is already in flight, the chunk is re-queued when the
-     * response arrives.
+     * Hands a chunk of the provided lane to the mesher pool.
+     *
+     * No in-flight guard: the pool keys every job by lane and chunk, so resubmitting a
+     * chunk whose request is still queued replaces it with the newer data, and
+     * resubmitting one already posted to a worker queues exactly one follow-up. Both
+     * cases used to be hand-rolled here.
      */
     private _requestMesh(lane: MeshLane, chunkKey: number): void {
-        if (lane.inFlight.has(chunkKey)) {
-            lane.dirtyAgain.add(chunkKey);
-
-            return;
-        }
-
         const world = lane.world();
         const mortonKey = new MortonKey(chunkKey);
 
@@ -2386,28 +2448,20 @@ export class VoxelEditor {
             return;
         }
 
-        lane.inFlight.add(chunkKey);
+        // Pack the chunk and its 26 neighbours for seam-correct meshing. A packed
+        // neighbourhood rather than a BVW1 snapshot: measured at 1.2 us against 17.2,
+        // and this runs on the thread that is trying to render.
+        const centre = world.get(mortonKey) ?? new VoxelChunk0(mortonKey.clone());
 
-        // snapshot the chunk and its 26 neighbours for seam-correct meshing
-        const region = new VoxelWorld();
+        // Blocky meshing needs the centre chunk's meta-data - that is where the
+        // per-voxel palette index lives, and expandQuads resolves a quad's colour
+        // through it. Smooth and wireframe read neither, so they do not carry it.
+        const carriesMeta = this._renderMode !== "smooth" && this._renderMode !== "wireframe";
+        const neighbourhood = this._packer.pack(centre, world, this._pool.acquireOccupancy(), carriesMeta);
 
-        for (let ox = -1; ox <= 1; ox++) {
-            for (let oy = -1; oy <= 1; oy++) {
-                for (let oz = -1; oz <= 1; oz++) {
-                    const neighbour = world.get(MortonKey.from(mortonKey.x + ox, mortonKey.y + oy, mortonKey.z + oz, this._scratchKey));
-
-                    if (neighbour !== null) {
-                        region.insert(neighbour);
-                    }
-                }
-            }
-        }
-
-        const snapshot = BVXSerializer.saveWorld(region);
-
-        // snapshot the occluding lanes' occupancy over the same neighbourhood -
-        // their cells cull this lane's geometry hidden at layer interfaces
-        const occluderSnapshot = this._buildOccluderSnapshot(lane, mortonKey);
+        // the occluding lanes' occupancy over the same neighbourhood - their cells cull
+        // this lane's geometry hidden at layer interfaces
+        const occluders = this._buildOccluders(lane, mortonKey);
 
         // flipped winding - BabylonJS treats clockwise faces as front-facing,
         // the opposite of the bvx-kit default counter-clockwise convention
@@ -2420,34 +2474,49 @@ export class VoxelEditor {
         // false because it builds its own line-list index buffer and the mesher's
         // triangle indices would be over a hundred kilobytes per fluid chunk
         // allocated only to be dropped.
+        const payload = {
+            kind: "neighbourhood" as const,
+            chunk: neighbourhood,
+            ...(occluders !== null ? { occluders: occluders } : {})
+        };
+
         let request: EditorMeshRequest;
 
         if (this._renderMode === "smooth") {
-            request = { id: 0, type: "smooth", chunkKey: chunkKey, smoothing: this._smoothing, flipped: true, world: snapshot };
+            request = {
+                id: 0,
+                type: "smooth",
+                smoothing: this._smoothing,
+                flipped: true,
+                payload: payload,
+                ...(occluders !== null ? { occlusionMode: lane.occlusionMode } : {})
+            };
         }
         else if (this._renderMode === "wireframe") {
-            request = { id: 0, type: "faces", chunkKey: chunkKey, flipped: true, world: snapshot, indices: false };
+            request = { id: 0, type: "faces", flipped: true, payload: payload, indices: false };
         }
         else {
             request = {
                 id: 0,
                 type: "blocky",
-                chunkKey: chunkKey,
-                world: snapshot,
+                payload: payload,
                 laneColor: lane.color,
                 water: lane === this._waterLane
             };
         }
 
-        if (occluderSnapshot !== null) {
-            request.occluders = occluderSnapshot;
+        this._pool.submit(request, `${lane.id}:${request.type}:${chunkKey}`)
+            .then((response) => this._onMeshResponse(lane, response))
+            .catch((error: unknown) => {
+                // Cancellation is routine - the world was replaced, or the render mode
+                // changed, or the request was superseded. A mesher or worker failure is
+                // not, and swallowing it would leave a chunk silently unmeshed.
+                if (error instanceof MesherPoolError && error.isCancellation) {
+                    return;
+                }
 
-            if (request.type === "smooth") {
-                request.occlusionMode = lane.occlusionMode;
-            }
-        }
-
-        this._pool.request(request).then((response) => this._onMeshResponse(lane, response));
+                console.error(`bvx-editor: meshing ${lane.id} chunk ${chunkKey} failed`, error);
+            });
     }
 
     /**
@@ -2509,12 +2578,18 @@ export class VoxelEditor {
      * Chunks present in a single occluder world are referenced directly - only
      * positions covered by multiple occluders merge into a scratch chunk.
      */
-    private _buildOccluderSnapshot(lane: MeshLane, mortonKey: MortonKey): Uint8Array | null {
+    private _buildOccluders(lane: MeshLane, mortonKey: MortonKey): ChunkNeighbourhood | null {
         if (lane.occluders.length === 0) {
             return null;
         }
 
-        const region = new VoxelWorld();
+        // Reused, not rebuilt. A fresh VoxelWorld defaults to 256 hash buckets and this
+        // one never holds more than 27 chunks, so the bucket array cost more than the
+        // index it carried - and it was allocated once per mesh request.
+        const region = this._occluderRegion;
+
+        region.clear();
+
         let count = 0;
 
         for (let ox = -1; ox <= 1; ox++) {
@@ -2563,7 +2638,13 @@ export class VoxelEditor {
             }
         }
 
-        return count > 0 ? BVXSerializer.saveWorld(region) : null;
+        if (count === 0) {
+            return null;
+        }
+
+        const centre = region.get(mortonKey) ?? new VoxelChunk0(mortonKey.clone());
+
+        return this._packer.pack(centre, region, this._pool.acquireOccupancy(), false);
     }
 
     /**
@@ -2580,8 +2661,6 @@ export class VoxelEditor {
      * its previous response to be drawn.
      */
     private _onMeshResponse(lane: MeshLane, response: EditorMeshResponse): void {
-        lane.inFlight.delete(response.chunkKey);
-
         this._readyResponses.push({ lane: lane, response: response });
     }
 
@@ -2605,11 +2684,6 @@ export class VoxelEditor {
             else if (response.type === "blocky") {
                 this._applyBlockyMesh(lane, response);
             }
-        }
-
-        // the chunk was edited again while the request was running
-        if (lane.dirtyAgain.delete(chunkKey)) {
-            this._queueMesh(lane, chunkKey);
         }
 
         this._publishStats(false);
@@ -3514,6 +3588,9 @@ export class VoxelEditor {
             bitVoxels: bitVoxels,
             triangles: triangles,
             workers: this._pool.size,
+            meshQueued: this._pool.queued,
+            meshInFlight: this._pool.inFlight,
+            meshPending: this._lanes.reduce((total, lane) => total + lane.pending.size, 0),
             sandGrains: this._sand.grainCount,
             waterGrains: this._water.grainCount,
             activeGrains: this._sand.activeCount + this._water.activeCount,

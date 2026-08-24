@@ -9,8 +9,9 @@ import { VoxelQuadGeometry } from "../src/lib/engine/geometry/voxel-quad-geometr
 import { MortonKey } from "../src/lib/math/morton-key.js";
 import { BVXGeometry } from "../src/lib/geometry/bvx-geometry.js";
 import { BVXSerializer } from "../src/lib/serialize/bvx-serializer.js";
-import { BVXMesher, MesherResponse, MesherRequest } from "../src/lib/worker/bvx-mesher.js";
+import { BVXMesher, MesherResponse, MesherRequest, MesherSnapshotPayload } from "../src/lib/worker/bvx-mesher.js";
 import { BVXWorkerHost, MesherScope } from "../src/lib/worker/bvx-worker-host.js";
+import { VoxelChunkArena } from "../src/lib/engine/chunks/voxel-chunk-arena.js";
 
 /**
  * Provides coverage for bvx-mesher.ts and bvx-worker-host.ts
@@ -40,9 +41,8 @@ describe('BVXMesher', () => {
         const response = mesher.process({
             id: 7,
             type: "faces",
-            chunkKey: chunk.key.key,
             flipped: false,
-            world: BVXSerializer.saveWorld(world)
+            payload: { kind: "snapshot", chunkKey: chunk.key.key, world: BVXSerializer.saveWorld(world) }
         });
 
         expect(response.id).toEqual(7);
@@ -66,10 +66,9 @@ describe('BVXMesher', () => {
         const response = mesher.process({
             id: 9,
             type: "smooth",
-            chunkKey: chunk.key.key,
             smoothing: 1,
             flipped: false,
-            world: BVXSerializer.saveWorld(world)
+            payload: { kind: "snapshot", chunkKey: chunk.key.key, world: BVXSerializer.saveWorld(world) }
         });
 
         expect(response.id).toEqual(9);
@@ -94,18 +93,16 @@ describe('BVXMesher', () => {
         const faces = mesher.process({
             id: 1,
             type: "faces",
-            chunkKey: missingKey,
             flipped: false,
-            world: BVXSerializer.saveWorld(world)
+            payload: { kind: "snapshot", chunkKey: missingKey, world: BVXSerializer.saveWorld(world) }
         });
 
         const smooth = mesher.process({
             id: 2,
             type: "smooth",
-            chunkKey: missingKey,
             smoothing: 0,
             flipped: false,
-            world: BVXSerializer.saveWorld(world)
+            payload: { kind: "snapshot", chunkKey: missingKey, world: BVXSerializer.saveWorld(world) }
         });
 
         if (faces.type === "faces") {
@@ -126,13 +123,12 @@ describe('BVXMesher', () => {
         const base: MesherRequest = {
             id: 1,
             type: "faces",
-            chunkKey: chunk.key.key,
             flipped: false,
-            world: BVXSerializer.saveWorld(world)
+            payload: { kind: "snapshot", chunkKey: chunk.key.key, world: BVXSerializer.saveWorld(world) }
         };
 
         const withIndices = mesher.process(base);
-        const without = mesher.process({ ...base, indices: false, world: BVXSerializer.saveWorld(world) });
+        const without = mesher.process({ ...base, indices: false, payload: { kind: "snapshot", chunkKey: chunk.key.key, world: BVXSerializer.saveWorld(world) } });
 
         if (withIndices.type !== "faces" || without.type !== "faces") {
             throw new Error("expected faces responses");
@@ -158,18 +154,16 @@ describe('BVXMesher', () => {
         const faces = mesher.process({
             id: 1,
             type: "faces",
-            chunkKey: chunk.key.key,
             flipped: false,
-            world: BVXSerializer.saveWorld(world)
+            payload: { kind: "snapshot", chunkKey: chunk.key.key, world: BVXSerializer.saveWorld(world) }
         });
 
         const smooth = mesher.process({
             id: 2,
             type: "smooth",
-            chunkKey: chunk.key.key,
             smoothing: 0,
             flipped: false,
-            world: BVXSerializer.saveWorld(world)
+            payload: { kind: "snapshot", chunkKey: chunk.key.key, world: BVXSerializer.saveWorld(world) }
         });
 
         // faceMasks, touched and indices
@@ -269,20 +263,25 @@ describe('BVXMesher', () => {
                         continue;
                     }
 
+                    const payload: MesherSnapshotPayload = {
+                        kind: "snapshot",
+                        chunkKey: key.key,
+                        world: worldSnapshot
+                    };
+
                     const request: MesherRequest = {
                         id: 0,
                         type: "smooth",
-                        chunkKey: key.key,
                         smoothing: smoothing,
                         flipped: false,
-                        world: worldSnapshot
+                        payload: payload
                     };
 
                     if (occluders !== null) {
                         const occluderSnapshot = snapshot(occluders, key);
 
                         if (occluderSnapshot !== null) {
-                            request.occluders = occluderSnapshot;
+                            payload.occluders = occluderSnapshot;
                             request.occlusionMode = mode;
                         }
                     }
@@ -376,10 +375,9 @@ describe('BVXMesher', () => {
         const request: MesherRequest = {
             id: 42,
             type: "smooth",
-            chunkKey: chunk.key.key,
             smoothing: 0,
             flipped: false,
-            world: BVXSerializer.saveWorld(world)
+            payload: { kind: "snapshot", chunkKey: chunk.key.key, world: BVXSerializer.saveWorld(world) }
         };
 
         (scope.onmessage as (event: { data: MesherRequest }) => void)({ data: request });
@@ -403,9 +401,8 @@ describe('BVXMesher', () => {
         const response = mesher.process({
             id: 1,
             type: "faces",
-            chunkKey: chunk.key.key,
             flipped: false,
-            world: BVXSerializer.saveWorld(world)
+            payload: { kind: "snapshot", chunkKey: chunk.key.key, world: BVXSerializer.saveWorld(world) }
         });
 
         if (response.type !== "faces") {
@@ -442,8 +439,7 @@ describe('BVXMesher', () => {
         const response = mesher.process({
             id: 11,
             type: "quads",
-            chunkKey: chunk.key.key,
-            world: BVXSerializer.saveWorld(world)
+            payload: { kind: "snapshot", chunkKey: chunk.key.key, world: BVXSerializer.saveWorld(world) }
         });
 
         expect(response.id).toEqual(11);
@@ -476,8 +472,7 @@ describe('BVXMesher', () => {
         const response = mesher.process({
             id: 12,
             type: "quads",
-            chunkKey: chunk.key.key,
-            world: BVXSerializer.saveWorld(world)
+            payload: { kind: "snapshot", chunkKey: chunk.key.key, world: BVXSerializer.saveWorld(world) }
         });
 
         if (response.type === "quads") {
@@ -498,8 +493,7 @@ describe('BVXMesher', () => {
         const response = mesher.process({
             id: 13,
             type: "quads",
-            chunkKey: MortonKey.from(9, 9, 9).key,
-            world: BVXSerializer.saveWorld(world)
+            payload: { kind: "snapshot", chunkKey: MortonKey.from(9, 9, 9).key, world: BVXSerializer.saveWorld(world) }
         });
 
         if (response.type === "quads") {
@@ -518,8 +512,7 @@ describe('BVXMesher', () => {
         const response = mesher.process({
             id: 14,
             type: "quads",
-            chunkKey: chunk.key.key,
-            world: BVXSerializer.saveWorld(world)
+            payload: { kind: "snapshot", chunkKey: chunk.key.key, world: BVXSerializer.saveWorld(world) }
         });
 
         const buffers = BVXMesher.transferables(response);
@@ -531,4 +524,144 @@ describe('BVXMesher', () => {
             expect(buffers[0]).toBe(response.quads.buffer);
         }
     });
+
+    it('BVXWorkerHost.attach() - answers a request that fails instead of throwing', () => {
+        const posted: MesherResponse[] = [];
+
+        const scope: MesherScope = {
+            onmessage: null,
+            postMessage: (message) => { posted.push(message as MesherResponse); }
+        };
+
+        new BVXWorkerHost().attach(scope);
+
+        // an arena payload with no arena bound - the one request shape the mesher
+        // genuinely cannot answer
+        scope.onmessage?.({
+            data: {
+                id: 42,
+                type: "faces",
+                flipped: false,
+                payload: { kind: "arena", chunk: { chunkKey: 7, slots: new Int32Array(27).fill(-1) } }
+            }
+        });
+
+        expect(posted.length).toEqual(1);
+        expect(posted[0].type).toEqual("error");
+        expect(posted[0].id).toEqual(42);
+
+        if (posted[0].type === "error") {
+            expect(posted[0].message).toContain("no arena is bound");
+        }
+    });
+
+    it('BVXWorkerHost.attach() - a response that cannot be posted still answers', () => {
+        const posted: MesherResponse[] = [];
+
+        let fail = true;
+
+        const scope: MesherScope = {
+            onmessage: null,
+            postMessage: (message) => {
+                // the first post fails the way a detached buffer would
+                if (fail) {
+                    fail = false;
+
+                    throw new Error("DataCloneError: detached ArrayBuffer");
+                }
+
+                posted.push(message as MesherResponse);
+            }
+        };
+
+        new BVXWorkerHost().attach(scope);
+
+        const { world, chunk } = buildWorld();
+
+        scope.onmessage?.({
+            data: {
+                id: 11,
+                type: "faces",
+                flipped: false,
+                payload: { kind: "snapshot", chunkKey: chunk.key.key, world: BVXSerializer.saveWorld(world) }
+            }
+        });
+
+        // the caller is waiting on id 11 and gets told, rather than waiting forever
+        expect(posted.length).toEqual(1);
+        expect(posted[0].id).toEqual(11);
+        expect(posted[0].type).toEqual("error");
+
+        if (posted[0].type === "error") {
+            expect(posted[0].message).toContain("could not be posted");
+        }
+    });
+
+    it('BVXWorkerHost.attach() - binds an arena and reports whether it is shared', () => {
+        const posted: unknown[] = [];
+
+        const scope: MesherScope = {
+            onmessage: null,
+            postMessage: (message) => { posted.push(message); }
+        };
+
+        const host = new BVXWorkerHost();
+
+        host.attach(scope);
+
+        scope.onmessage?.({
+            data: {
+                type: "bind-arena",
+                id: 1,
+                buffer: new ArrayBuffer(VoxelChunkArena.byteLengthFor(8, 0)),
+                capacity: 8,
+                metaByteLength: 0
+            } as never
+        });
+
+        expect(posted.length).toEqual(1);
+        expect(posted[0]).toEqual({ type: "ready", id: 1, shared: false });
+        expect(host.mesher.arena).not.toBeNull();
+        expect(host.mesher.arena?.capacity).toEqual(8);
+
+        // a buffer that cannot back the arena described is reported, not thrown
+        scope.onmessage?.({
+            data: { type: "bind-arena", id: 2, buffer: new ArrayBuffer(4), capacity: 8, metaByteLength: 0 } as never
+        });
+
+        expect(posted.length).toEqual(2);
+        expect((posted[1] as { error?: string }).error).toContain("too small");
+    });
+
+    it('BVXWorkerHost.attach() - binds a separate occluder arena', () => {
+        const posted: unknown[] = [];
+
+        const scope: MesherScope = {
+            onmessage: null,
+            postMessage: (message) => { posted.push(message); }
+        };
+
+        const host = new BVXWorkerHost();
+
+        host.attach(scope);
+
+        scope.onmessage?.({
+            data: {
+                type: "bind-arena",
+                id: 1,
+                buffer: new ArrayBuffer(VoxelChunkArena.byteLengthFor(4, 0)),
+                capacity: 4,
+                metaByteLength: 0,
+                occluders: {
+                    buffer: new ArrayBuffer(VoxelChunkArena.byteLengthFor(4, 0)),
+                    capacity: 4,
+                    metaByteLength: 0
+                }
+            } as never
+        });
+
+        expect((posted[0] as { error?: string }).error).toBeUndefined();
+        expect(host.mesher.arena?.capacity).toEqual(4);
+    });
+
 });

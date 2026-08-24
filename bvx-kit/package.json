@@ -1,6 +1,6 @@
 {
-  "name": "@astrumforge/bvx-kit",
-  "version": "0.0.1",
+  "name": "@astrum-forge/bvx-kit",
+  "version": "2.0.0",
   "description": "Generic & Renderer Agnostic BitVoxel Engine Implementation in TypeScript",
   "main": "out/index.js",
   "module": "out/index.js",
@@ -10,6 +10,7 @@
     "clean": "rm -rf out coverage node_modules package-lock.json && npm cache clean --force",
     "build": "npm install && npm run build-ts",
     "build-ts": "tsc --noEmitOnError",
+    "verify:esm": "node scripts/verify-esm.mjs",
     "clean:build": "npm run clean && npm run build",
     "clean:build-run": "npm run clean:build && node out/index.js",
     "dev:build-run": "rm -rf out && npm run build-ts && node out/index.js",
@@ -17,7 +18,10 @@
     "test:coverage": "rm -rf coverage && jest --clearCache && jest --coverage --runInBand --collectCoverageFrom='src/lib/**/*.{ts,tsx}'",
     "test:ci": "jest --ci --runInBand --coverage --collectCoverageFrom='src/lib/**/*.{ts,tsx}'",
     "bench": "npm run build-ts && node bench/bench.js",
-    "lint": "npx eslint ."
+    "lint": "eslint .",
+    "bench:worker": "node bench/worker-protocol/index.mjs",
+    "bench:smooth-cpu": "node bench/gpu-smooth/cpu-node.mjs",
+    "bench:gpu": "python3 bench/gpu/serve.py 8741"
   },
   "repository": {
     "type": "git",
@@ -38,21 +42,27 @@
   },
   "homepage": "https://github.com/astrum-forge/bvx-kit",
   "devDependencies": {
-    "@eslint/js": "^9.20.0",
-    "@types/eslint__js": "^8.42.3",
-    "@types/jest": "^29.5.14",
-    "@typescript-eslint/eslint-plugin": "^8.24.1",
-    "@typescript-eslint/parser": "^8.24.1",
+    "@eslint/js": "^10.0.1",
+    "@types/jest": "^30.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.67.0",
+    "@typescript-eslint/parser": "^8.67.0",
     "@webgpu/types": "^0.1.72",
-    "eslint": "^9.20.1",
-    "globals": "^15.15.0",
-    "jest": "^29.7.0",
-    "ts-jest": "^29.2.5",
+    "eslint": "^10.9.0",
+    "globals": "^17.11.0",
+    "jest": "^30.4.2",
+    "ts-jest": "^29.4.12",
     "ts-node": "^10.9.2",
-    "typescript": "^5.7.3",
-    "typescript-eslint": "^8.24.1"
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.67.0"
   },
   "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
     "access": "public"
-  }
+  },
+  "files": [
+    "out/",
+    "README.md",
+    "LICENSE",
+    "MIGRATION.md"
+  ]
 }

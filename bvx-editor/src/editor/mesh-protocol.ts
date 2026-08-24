@@ -1,4 +1,4 @@
-import type { MesherRequest, MesherResponse } from "@astrumforge/bvx-kit";
+import type { ChunkNeighbourhood, MesherPayload, MesherRequest, MesherRequestBase, MesherResponse, MesherResponseBase } from "@astrum-forge/bvx-kit";
 import type { BlockyMesh } from "./blocky-expand";
 
 /**
@@ -9,21 +9,19 @@ import type { BlockyMesh } from "./blocky-expand";
  * This request carries those, so the whole job - face visibility, ambient
  * occlusion, and the vertex streams - completes inside the worker and the main
  * thread only uploads the result.
+ *
+ * It extends MesherRequestBase so the kit's pool can carry it: the pool is generic over
+ * the request type and takes `transferables` and `keyOf` hooks for exactly this.
  */
-export interface BlockyMeshRequest {
-    id: number;
+export interface BlockyMeshRequest extends MesherRequestBase {
     type: "blocky";
-    chunkKey: number;
 
     /**
-     * BVW1 snapshot of the chunk and its 26 neighbours.
+     * The chunk and its 26 neighbours. Always a `neighbourhood` payload here - the
+     * editor has the live world in hand and packing one costs 1.2 us against BVW1's
+     * 17.2, all of it on the thread that is trying to render.
      */
-    world: Uint8Array;
-
-    /**
-     * BVW1 snapshot of the occluding lanes over the same neighbourhood.
-     */
-    occluders?: Uint8Array;
+    payload: MesherPayload;
 
     /**
      * A flat colour for the whole lane, or null to take each voxel's colour from
@@ -42,10 +40,8 @@ export interface BlockyMeshRequest {
 /**
  * A fully expanded blocky mesh, ready to upload.
  */
-export interface BlockyMeshResponse extends BlockyMesh {
-    id: number;
+export interface BlockyMeshResponse extends MesherResponseBase, BlockyMesh {
     type: "blocky";
-    chunkKey: number;
 }
 
 /**
@@ -58,6 +54,39 @@ export type EditorMeshRequest = MesherRequest | BlockyMeshRequest;
  * Everything the editor's mesher worker returns.
  */
 export type EditorMeshResponse = MesherResponse | BlockyMeshResponse;
+
+/**
+ * The occupancy buffers of a neighbourhood payload, for the pool to recycle.
+ */
+export function payloadOccupancy(payload: MesherPayload): ChunkNeighbourhood[] {
+    if (payload.kind !== "neighbourhood") {
+        return [];
+    }
+
+    return payload.occluders !== undefined ? [payload.chunk, payload.occluders] : [payload.chunk];
+}
+
+/**
+ * Collects the transferable buffers of an editor request, so the neighbourhood
+ * occupancy moves rather than being cloned.
+ */
+export function editorRequestTransferables(request: EditorMeshRequest): ArrayBuffer[] {
+    const buffers: ArrayBuffer[] = [];
+
+    for (const neighbourhood of payloadOccupancy(request.payload)) {
+        buffers.push(neighbourhood.occupancy.buffer as ArrayBuffer);
+    }
+
+    if (request.payload.kind === "snapshot") {
+        buffers.push(request.payload.world.buffer as ArrayBuffer);
+
+        if (request.payload.occluders !== undefined) {
+            buffers.push(request.payload.occluders.buffer as ArrayBuffer);
+        }
+    }
+
+    return buffers.filter((buffer, index) => buffer.byteLength > 0 && buffers.indexOf(buffer) === index);
+}
 
 /**
  * Collects the transferable buffers of a blocky response, so the vertex streams
@@ -75,8 +104,14 @@ export function blockyTransferables(response: BlockyMeshResponse): ArrayBuffer[]
         buffers.push(response.occlusion.buffer as ArrayBuffer);
     }
 
+    if (response.recycle !== undefined) {
+        for (const occupancy of response.recycle) {
+            buffers.push(occupancy.buffer as ArrayBuffer);
+        }
+    }
+
     // a chunk with no visible faces allocates zero-length buffers; transferring
     // one is pointless, and postMessage rejects the same buffer twice - which is
     // exactly what several zero-length allocations can collapse into
-    return buffers.filter((buffer) => buffer.byteLength > 0);
+    return buffers.filter((buffer, index) => buffer.byteLength > 0 && buffers.indexOf(buffer) === index);
 }

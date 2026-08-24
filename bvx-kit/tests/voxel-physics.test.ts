@@ -3,6 +3,7 @@ import { VoxelChunk0 } from "../src/lib/engine/chunks/voxel-chunk-0.js";
 import { VoxelIndex } from "../src/lib/engine/voxel-index.js";
 import { VoxelWorld } from "../src/lib/engine/voxel-world.js";
 import { VoxelFaceGeometry } from "../src/lib/engine/geometry/voxel-face-geometry.js";
+import { VoxelChunkArena } from "../src/lib/engine/chunks/voxel-chunk-arena.js";
 import { VoxelPhysics } from "../src/lib/engine/physics/voxel-physics.js";
 import { VoxelPhysicsLayer } from "../src/lib/engine/physics/voxel-physics-layer.js";
 import { MortonKey } from "../src/lib/math/morton-key.js";
@@ -75,7 +76,7 @@ describe('VoxelPhysics', () => {
         expect(sand.activeCount).toEqual(0);
 
         // a dormant simulation performs no moves
-        expect(physics.update()).toEqual(0);
+        expect(physics.update().moves).toEqual(0);
     });
 
     it('.update() - a falling column compacts together within a single tick', () => {
@@ -243,7 +244,7 @@ describe('VoxelPhysics', () => {
         expect(water.length).toEqual(2);
 
         // water never sinks through sand - everything is dormant and stable
-        expect(physics.update(5)).toEqual(0);
+        expect(physics.update(5).moves).toEqual(0);
         expect(sand.get(8, 0, 8)).toEqual(1);
     });
 
@@ -422,7 +423,7 @@ describe('VoxelPhysics', () => {
 
         expect(restored.length).toEqual(0);
         expect(restored.drainDirtyChunks().size).toBeGreaterThan(0);
-        expect(restoredPhysics.update()).toEqual(0);
+        expect(restoredPhysics.update().moves).toEqual(0);
     });
 
     it('.update() - empty chunks are removed once dormant', () => {
@@ -440,106 +441,6 @@ describe('VoxelPhysics', () => {
         expect(sand.world.get(MortonKey.from(0, 1, 0))).toBeNull();
         expect(sand.world.get(MortonKey.from(0, 0, 0))).not.toBeNull();
     });
-    it('.update() - a move budget bounds the work and defers the rest', () => {
-        const physics = makePhysics();
-        const sand = physics.addLayer(VoxelPhysics.SAND);
-
-        // a wide field of grains high in the air - every one of them wants to fall,
-        // and they span enough chunks that a budget can cut the sweep part way
-        for (let x = 0; x < 32; x++) {
-            for (let z = 0; z < 32; z++) {
-                for (let y = 40; y < 48; y++) {
-                    sand.set(x, y, z);
-                }
-            }
-        }
-
-        const total = sand.length;
-
-        expect(total).toEqual(32 * 32 * 8);
-
-        // an unbudgeted tick moves far more than the budget we are about to impose
-        const reference = makePhysics();
-        const referenceSand = reference.addLayer(VoxelPhysics.SAND);
-
-        for (let x = 0; x < 32; x++) {
-            for (let z = 0; z < 32; z++) {
-                for (let y = 40; y < 48; y++) {
-                    referenceSand.set(x, y, z);
-                }
-            }
-        }
-
-        const unbudgeted = reference.update();
-
-        expect(reference.budgetExceeded).toEqual(false);
-        expect(unbudgeted).toBeGreaterThan(1000);
-
-        const budgeted = physics.update(1, 100);
-
-        expect(physics.budgetExceeded).toEqual(true);
-        expect(budgeted).toBeLessThan(unbudgeted);
-
-        // no grain is lost or duplicated by stopping mid-sweep
-        expect(sand.length).toEqual(total);
-    });
-
-    it('.update() - a budgeted simulation still settles, just over more ticks', () => {
-        const physics = makePhysics();
-        const sand = physics.addLayer(VoxelPhysics.SAND);
-
-        for (let x = 0; x < 8; x++) {
-            for (let z = 0; z < 8; z++) {
-                for (let y = 20; y < 24; y++) {
-                    sand.set(x, y, z);
-                }
-            }
-        }
-
-        const total = sand.length;
-
-        // tick with a tight budget until nothing is left to do
-        let ticks = 0;
-
-        while (physics.update(1, 50) > 0 && ticks < 5000) {
-            ticks++;
-        }
-
-        expect(ticks).toBeLessThan(5000);
-        expect(physics.budgetExceeded).toEqual(false);
-        expect(sand.length).toEqual(total);
-
-        // everything came to rest near the floor - a pile slides outward as it
-        // settles, so the footprint is wider than it started
-        let aloft = 0;
-
-        for (let x = 0; x < 32; x++) {
-            for (let z = 0; z < 32; z++) {
-                for (let y = 8; y < 32; y++) {
-                    aloft += sand.get(x, y, z);
-                }
-            }
-        }
-
-        expect(aloft).toEqual(0);
-    });
-
-    it('.update() - a budget of zero or less is unlimited', () => {
-        const physics = makePhysics();
-        const sand = physics.addLayer(VoxelPhysics.SAND);
-
-        for (let x = 0; x < 8; x++) {
-            for (let z = 0; z < 8; z++) {
-                sand.set(x, 30, z);
-            }
-        }
-
-        const moves = physics.update(1, 0);
-
-        expect(moves).toEqual(64);
-        expect(physics.budgetExceeded).toEqual(false);
-    });
-
     /**
      * Fills a layer with a wide slab of grains that all want to move, spanning
      * enough chunks that a budget can cut the sweep part way through.
@@ -554,17 +455,37 @@ describe('VoxelPhysics', () => {
         }
     };
 
+    /**
+     * Every set BitVoxel of a layer, as a sorted list of encoded coordinates. Two
+     * simulations agree exactly when these agree.
+     */
+    const snapshot = (layer: VoxelPhysicsLayer): string => {
+        const cells: number[] = [];
+
+        for (let x = 0; x < 48; x++) {
+            for (let y = 0; y < 56; y++) {
+                for (let z = 0; z < 48; z++) {
+                    if (layer.get(x, y, z) !== 0) {
+                        cells.push((x * 100000) + (y * 100) + z);
+                    }
+                }
+            }
+        }
+
+        return cells.sort((a, b) => a - b).join(",");
+    };
+
     it('.update() - a work budget bounds the probes and defers the rest', () => {
         const reference = makePhysics();
         const referenceSand = reference.addLayer(VoxelPhysics.SAND);
 
         fillSlab(referenceSand);
-        reference.update();
 
-        const unbudgetedWork = referenceSand.workPerformed;
+        const unbudgeted = reference.update();
 
-        expect(reference.budgetExceeded).toEqual(false);
-        expect(unbudgetedWork).toBeGreaterThan(1000);
+        expect(unbudgeted.complete).toEqual(true);
+        expect(unbudgeted.work).toBeGreaterThan(1000);
+        expect(unbudgeted.moves).toBeGreaterThan(1000);
 
         const physics = makePhysics();
         const sand = physics.addLayer(VoxelPhysics.SAND);
@@ -574,22 +495,88 @@ describe('VoxelPhysics', () => {
         const total = sand.length;
         const limit = 500;
 
-        physics.update(1, 0, limit);
+        const budgeted = physics.update(1, limit);
 
-        expect(physics.budgetExceeded).toEqual(true);
-        expect(sand.workPerformed).toBeLessThan(unbudgetedWork);
+        expect(budgeted.complete).toEqual(false);
+        expect(physics.tickInProgress).toEqual(true);
+        expect(budgeted.ticks).toEqual(0);
+        expect(budgeted.work).toBeLessThan(unbudgeted.work);
 
         // The cap is honoured to within one y-plane of a chunk, which is where the
         // sweep checks it - not to the exact probe.
-        expect(sand.workPerformed).toBeGreaterThanOrEqual(limit);
-        expect(sand.workPerformed).toBeLessThan(limit * 4);
+        expect(budgeted.work).toBeGreaterThanOrEqual(limit);
+        expect(budgeted.work).toBeLessThan(limit * 4);
 
         // no grain is lost or duplicated by stopping mid-chunk
         expect(sand.length).toEqual(total);
+
+        // the tick counter has not moved, because the tick has not finished
+        expect(physics.tick).toEqual(0);
     });
 
-    it('.update() - a work-budgeted simulation still settles, just over more ticks', () => {
-        const settle = (maxWork: number): { grains: number, ticks: number, aloft: number } => {
+    it('.update() - a budget changes the pacing and nothing else', () => {
+        // This is the property the resumable sweep exists to provide: a tick either
+        // completes or is continued, never partially applied and abandoned. So the
+        // world after N completed ticks must be identical no matter how many calls it
+        // took to get there.
+        const run = (maxWork: number, targetTicks: number): string => {
+            const physics = makePhysics();
+            const sand = physics.addLayer(VoxelPhysics.SAND);
+            const water = physics.addLayer(VoxelPhysics.WATER);
+
+            for (let x = 0; x < 12; x++) {
+                for (let z = 0; z < 12; z++) {
+                    for (let y = 30; y < 34; y++) {
+                        sand.set(x, y, z);
+                    }
+
+                    for (let y = 34; y < 38; y++) {
+                        water.set(x, y, z);
+                    }
+                }
+            }
+
+            let guard = 0;
+
+            while (physics.tick < targetTicks && guard < 100000) {
+                physics.update(1, maxWork);
+                guard++;
+            }
+
+            expect(physics.tick).toEqual(targetTicks);
+            expect(physics.tickInProgress).toEqual(false);
+
+            return `${snapshot(sand)}|${snapshot(water)}`;
+        };
+
+        const free = run(0, 40);
+
+        expect(run(1, 40)).toEqual(free);
+        expect(run(37, 40)).toEqual(free);
+        expect(run(500, 40)).toEqual(free);
+        expect(run(100000, 40)).toEqual(free);
+    });
+
+    it('.update() - a budget of zero or less is unlimited', () => {
+        const physics = makePhysics();
+        const sand = physics.addLayer(VoxelPhysics.SAND);
+
+        for (let x = 0; x < 8; x++) {
+            for (let z = 0; z < 8; z++) {
+                sand.set(x, 30, z);
+            }
+        }
+
+        const result = physics.update(1, 0);
+
+        expect(result.moves).toEqual(64);
+        expect(result.ticks).toEqual(1);
+        expect(result.complete).toEqual(true);
+        expect(physics.tickInProgress).toEqual(false);
+    });
+
+    it('.update() - a budgeted simulation still settles, over more calls', () => {
+        const settle = (maxWork: number): { grains: number, calls: number, ticks: number, aloft: number } => {
             const physics = makePhysics();
             const sand = physics.addLayer(VoxelPhysics.SAND);
 
@@ -601,12 +588,11 @@ describe('VoxelPhysics', () => {
                 }
             }
 
-            // generous tick ceiling - a budgeted run needs more of them
-            let ticks = 0;
+            let calls = 0;
 
-            while (sand.activeCount > 0 && ticks < 5000) {
-                physics.update(1, 0, maxWork);
-                ticks++;
+            while ((sand.activeCount > 0 || physics.tickInProgress) && calls < 20000) {
+                physics.update(1, maxWork);
+                calls++;
             }
 
             let aloft = 0;
@@ -619,32 +605,34 @@ describe('VoxelPhysics', () => {
                 }
             }
 
-            return { grains: sand.grainCount, ticks: ticks, aloft: aloft };
+            return { grains: sand.grainCount, calls: calls, ticks: physics.tick, aloft: aloft };
         };
 
         const budgeted = settle(200);
         const free = settle(0);
 
-        // Both come fully to rest on the floor with every grain accounted for.
-        // Not the same arrangement, though: stopping mid-chunk changes the order
-        // cells are contested in, so grains land in a different valid pile - the
-        // same latitude the move budget has always had.
+        // Same pile, same grain count, same number of simulation ticks - the budget
+        // only changed how many calls it took to run them.
         expect(budgeted.grains).toEqual(free.grains);
+        expect(budgeted.ticks).toEqual(free.ticks);
         expect(budgeted.aloft).toEqual(0);
         expect(free.aloft).toEqual(0);
 
-        // and it genuinely took longer, which is the trade being made
-        expect(budgeted.ticks).toBeGreaterThan(free.ticks);
-        expect(budgeted.ticks).toBeLessThan(5000);
+        // and it genuinely took more calls, which is the trade being made
+        expect(budgeted.calls).toBeGreaterThan(free.calls);
+        expect(budgeted.calls).toBeLessThan(20000);
     });
 
-    it('.update() - a work budget leaves the lighter layer a tick of its own', () => {
+    it('.update() - a tight budget cannot starve the lighter layer of its tick', () => {
+        // The old budget could skip layers that had not yet stepped when it ran out,
+        // so a dense layer could spend the whole allowance and leave water - typically
+        // the one actually moving - with no tick at all. A resumable tick removes that
+        // failure by construction: the tick is not finished until every layer has
+        // stepped, so every completed tick is a tick for every layer.
         const physics = makePhysics();
         const sand = physics.addLayer(VoxelPhysics.SAND);
         const water = physics.addLayer(VoxelPhysics.WATER);
 
-        // sand below, water above: sand is denser so it steps first, and an
-        // undivided budget would let it spend the whole allowance
         for (let x = 0; x < 24; x++) {
             for (let z = 0; z < 24; z++) {
                 for (let y = 30; y < 36; y++) {
@@ -657,17 +645,135 @@ describe('VoxelPhysics', () => {
             }
         }
 
+        let completed = 0;
         let waterStepped = 0;
+        let calls = 0;
 
-        for (let i = 0; i < 20; i++) {
-            physics.update(1, 0, 400);
+        while (completed < 8 && calls < 20000) {
+            const before: number = physics.tick;
+
+            physics.update(1, 400);
+            calls++;
 
             if (water.workPerformed > 0) {
                 waterStepped++;
             }
+
+            if (physics.tick !== before) {
+                completed++;
+
+                // a completed tick always stepped the water, however tight the budget
+                expect(waterStepped).toBeGreaterThanOrEqual(completed);
+            }
         }
 
-        // every tick, not merely most of them
-        expect(waterStepped).toEqual(20);
+        expect(completed).toEqual(8);
+        expect(calls).toBeGreaterThan(8);
     });
+
+    it('.update() - advances several ticks in one call', () => {
+        const physics = makePhysics();
+        const sand = physics.addLayer(VoxelPhysics.SAND);
+
+        for (let x = 0; x < 4; x++) {
+            for (let z = 0; z < 4; z++) {
+                sand.set(x, 30, z);
+            }
+        }
+
+        const result = physics.update(5);
+
+        expect(result.ticks).toEqual(5);
+        expect(result.complete).toEqual(true);
+        expect(physics.tick).toEqual(5);
+        expect(sand.get(0, 25, 0)).toEqual(1);
+    });
+
+    it('.addLayer() - an arena-backed layer simulates identically and reports its slots', () => {
+        const run = (arena: VoxelChunkArena | null): { snapshot: string; slots: number[] } => {
+            const physics = makePhysics();
+            const sand = physics.addLayer(VoxelPhysics.SAND, arena);
+
+            for (let x = 0; x < 10; x++) {
+                for (let z = 0; z < 10; z++) {
+                    for (let y = 24; y < 28; y++) {
+                        sand.set(x, y, z);
+                    }
+                }
+            }
+
+            for (let i = 0; i < 40; i++) {
+                physics.update();
+            }
+
+            const cells: number[] = [];
+
+            for (let x = 0; x < 32; x++) {
+                for (let y = 0; y < 32; y++) {
+                    for (let z = 0; z < 32; z++) {
+                        if (sand.get(x, y, z) !== 0) {
+                            cells.push((x * 100000) + (y * 100) + z);
+                        }
+                    }
+                }
+            }
+
+            const slots: number[] = [];
+
+            for (const chunk of sand.world.chunks.values()) {
+                slots.push(sand.slotOf(chunk.key.key));
+            }
+
+            return { snapshot: cells.sort((a, b) => a - b).join(","), slots: slots.sort((a, b) => a - b) };
+        };
+
+        const arena = new VoxelChunkArena(64, 0);
+        const backed = run(arena);
+        const owned = run(null);
+
+        // the same simulation, whoever owns the memory
+        expect(backed.snapshot).toEqual(owned.snapshot);
+        expect(backed.snapshot.length).toBeGreaterThan(0);
+
+        // every live chunk names a distinct arena slot
+        expect(backed.slots.length).toBeGreaterThan(0);
+        expect(new Set(backed.slots).size).toEqual(backed.slots.length);
+
+        for (const slot of backed.slots) {
+            expect(slot).toBeGreaterThanOrEqual(0);
+            expect(arena.isAllocated(slot)).toEqual(true);
+        }
+
+        // a layer with no arena reports no slots
+        expect(owned.slots.every((slot) => slot === -1)).toEqual(true);
+    });
+
+    it('.addLayer() - an arena-backed layer releases slots as chunks empty', () => {
+        const arena = new VoxelChunkArena(64, 0);
+        const physics = makePhysics();
+        const sand = physics.addLayer(VoxelPhysics.SAND, arena);
+
+        // a column high in the air: it falls through several chunks and abandons them
+        for (let y = 40; y < 48; y++) {
+            sand.set(4, y, 4);
+        }
+
+        const peak = arena.length;
+
+        expect(peak).toBeGreaterThan(0);
+
+        for (let i = 0; i < 200; i++) {
+            physics.update();
+        }
+
+        // everything landed in one chunk near the floor, and the chunks it left behind
+        // gave their slots back rather than leaking them
+        expect(arena.length).toBeLessThan(peak + 1);
+        expect(sand.grainCount).toEqual(8);
+
+        sand.clear();
+
+        expect(arena.length).toEqual(0);
+    });
+
 });

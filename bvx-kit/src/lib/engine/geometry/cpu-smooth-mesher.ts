@@ -52,6 +52,10 @@ export class CpuSmoothMesher implements SmoothMesher {
             residency: "cpu",
             vertexCount: vertices.length / 3,
             indexCount: indices.length,
+
+            // the CPU resolves a degenerate gradient from the adjacent triangles
+            // before returning, so nothing is left unresolved
+            degenerateNormals: 0,
             vertices: vertices,
             normals: normals,
             indices: indices,

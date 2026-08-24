@@ -212,4 +212,35 @@ describe('HashGrid', () => {
 
         expect(seenValues.size).toBe(16);
     });
+
+    it('.clear() - empties the grid but keeps the buckets', () => {
+        const grid = new HashGrid<MortonKey, number>(16);
+
+        for (let i = 0; i < 40; i++) {
+            grid.set(MortonKey.from(i, i, i), i);
+        }
+
+        expect(grid.length).toEqual(40);
+
+        grid.clear();
+
+        expect(grid.length).toEqual(0);
+        expect(grid.size).toEqual(16);
+        expect(grid.get(MortonKey.from(3, 3, 3))).toBeNull();
+        expect(Array.from(grid.values()).length).toEqual(0);
+        expect(Array.from(grid.keys()).length).toEqual(0);
+
+        // and it refills correctly afterwards
+        grid.set(MortonKey.from(1, 2, 3), 99);
+
+        expect(grid.length).toEqual(1);
+        expect(grid.get(MortonKey.from(1, 2, 3))).toEqual(99);
+
+        // clearing an already-empty grid is a no-op
+        grid.clear();
+        grid.clear();
+
+        expect(grid.length).toEqual(0);
+    });
+
 });

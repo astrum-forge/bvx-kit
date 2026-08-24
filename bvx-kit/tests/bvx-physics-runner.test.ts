@@ -102,7 +102,7 @@ describe('BVXPhysicsRunner', () => {
         expect(runner.layers[0].get(1, 3, 1)).toEqual(1);
 
         // it falls, and stops on the seeded floor rather than passing through it
-        runner.process({ id: 2, type: "step", steps: 10 });
+        runner.process({ id: 2, type: "step", ticks: 10 });
 
         expect(runner.layers[0].get(1, 1, 1)).toEqual(1);
         expect(runner.layers[0].length).toEqual(1);
@@ -138,7 +138,7 @@ describe('BVXPhysicsRunner', () => {
 
         runner.process({ id: 2, type: "edit", set: coords(...platform) });
         runner.process({ id: 3, type: "inject", layer: 0, set: coords([1, 11, 1]) });
-        runner.process({ id: 4, type: "step", steps: 20 });
+        runner.process({ id: 4, type: "step", ticks: 20 });
 
         // it settled on the platform
         expect(runner.layers[0].get(1, 11, 1)).toEqual(1);
@@ -149,7 +149,7 @@ describe('BVXPhysicsRunner', () => {
 
         expect(runner.layers[0].activeCount).toBeGreaterThan(0);
 
-        runner.process({ id: 6, type: "step", steps: 20 });
+        runner.process({ id: 6, type: "step", ticks: 20 });
 
         expect(runner.layers[0].get(1, 11, 1)).toEqual(0);
         expect(runner.layers[0].get(1, 0, 1)).toEqual(1);
@@ -264,11 +264,32 @@ describe('BVXPhysicsRunner', () => {
 
         runner.process({ id: 2, type: "inject", layer: 0, set: coords(...grains) });
 
-        const budgeted = runner.process({ id: 3, type: "step", steps: 1, maxMoves: 50 }) as PhysicsStepResponse;
+        const budgeted = runner.process({ id: 3, type: "step", ticks: 1, maxWork: 200 }) as PhysicsStepResponse;
 
-        expect(budgeted.budgetExceeded).toEqual(true);
+        // the budget stopped the tick part-way, so nothing completed and the counter
+        // has not moved - the next step request resumes it
+        expect(budgeted.complete).toEqual(false);
+        expect(budgeted.ticks).toEqual(0);
+        expect(budgeted.tick).toEqual(0);
+        expect(budgeted.work).toBeGreaterThanOrEqual(200);
         expect(budgeted.moves).toBeGreaterThan(0);
         expect(budgeted.moves).toBeLessThan(24 * 24);
+
+        // stepping until it completes advances the counter exactly once
+        let guard = 0;
+
+        while (guard < 1000) {
+            const next = runner.process({ id: 4, type: "step", ticks: 1, maxWork: 200 }) as PhysicsStepResponse;
+
+            guard++;
+
+            if (next.tick === 1) {
+                break;
+            }
+        }
+
+        expect(guard).toBeLessThan(1000);
+        expect((runner.physics as VoxelPhysics).tick).toEqual(1);
     });
 
     it('.transferables() - collects every delta buffer', () => {

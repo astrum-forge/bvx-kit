@@ -42,7 +42,7 @@ export const App = () => {
     const [smoothing, setSmoothing] = useState(1);
     const [occlusion, setOcclusion] = useState(true);
     const [playing, setPlaying] = useState(true);
-    const [stats, setStats] = useState<EditorStats>({ chunks: 0, bitVoxels: 0, triangles: 0, workers: 0, sandGrains: 0, waterGrains: 0, activeGrains: 0, fps: 0, cpuFrameTime: 0, drawnMeshes: 0 });
+    const [stats, setStats] = useState<EditorStats>({ chunks: 0, bitVoxels: 0, triangles: 0, workers: 0, meshQueued: 0, meshInFlight: 0, meshPending: 0, sandGrains: 0, waterGrains: 0, activeGrains: 0, fps: 0, cpuFrameTime: 0, drawnMeshes: 0 });
     const [canUndo, setCanUndo] = useState(false);
     const [canRedo, setCanRedo] = useState(false);
     const [startupError, setStartupError] = useState<string | null>(null);
@@ -474,6 +474,7 @@ export const App = () => {
                             <div><dt>Triangles</dt><dd>{stats.triangles.toLocaleString()}</dd></div>
                             <div><dt>Drawn meshes</dt><dd>{stats.drawnMeshes.toLocaleString()}</dd></div>
                             <div><dt>Mesh workers</dt><dd>{stats.workers}</dd></div>
+                            <div><dt>Mesh backlog</dt><dd>{stats.meshPending.toLocaleString()} · {stats.meshQueued.toLocaleString()} · {stats.meshInFlight.toLocaleString()}</dd></div>
                         </dl>
                     </section>
 

@@ -5,6 +5,14 @@ bvx-kit/coverage/
 bvx-editor/package-lock.json
 bvx-editor/node_modules/
 bvx-editor/dist/
+
+# working notes, not part of the repository
 .plans/
+
 .DS_Store
-bvx-kit/bench/
+
+# benchmark output, but not the benchmarks themselves - the performance claims in
+# the source comments are only checkable if the harness that produced them ships
+bvx-kit/bench/**/results.json
+bvx-kit/bench/**/stability-*.json
+bvx-kit/bench/**/stability-*.txt
