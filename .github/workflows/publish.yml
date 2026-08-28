@@ -133,11 +133,22 @@ jobs:
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # npm 12 changed `npm pack --json` from an array of results to an object
+      # keyed by package name, so read both shapes. pipefail matters too: a
+      # failing npm prints `{"error": {...}}` to stdout in --json mode, which
+      # parses cleanly and would otherwise mask npm's real exit code.
       - name: Pack a tarball for the release assets
         id: pack
         working-directory: bvx-kit
         run: |
-          file=$(npm pack --json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8'))[0].filename")
+          set -euo pipefail
+
+          file=$(npm pack --json | node -p "
+            const out = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            const entry = Array.isArray(out) ? out[0] : Object.values(out)[0];
+            entry.filename")
+
+          test -f "$file"
           echo "file=bvx-kit/${file}" >> "$GITHUB_OUTPUT"
       - name: Create the GitHub Release
         uses: softprops/action-gh-release@v3
