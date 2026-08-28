@@ -21,27 +21,22 @@ on:
       - "[0-9]+.[0-9]+.[0-9]+-*"
       - "v[0-9]+.[0-9]+.[0-9]+"
       - "v[0-9]+.[0-9]+.[0-9]+-*"
-
 permissions:
   contents: write
   packages: write
   id-token: write # npmjs trusted publishing exchanges this OIDC token
-
 env:
   NPMJS_NAME: "@astrumforge/bvx-kit"
   GITHUB_PKG_NAME: "@astrum-forge/bvx-kit"
-
 jobs:
   publish:
     name: Publish to npmjs and GitHub Packages
     runs-on: ubuntu-latest
     environment: release
-
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-
       - name: Resolve version from tag
         id: version
         run: |
@@ -50,13 +45,9 @@ jobs:
 
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "Releasing ${version} from tag ${raw}"
-
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: bvx-kit/package-lock.json
-
       # Trusted publishing needs npm >= 11.5.1. Node 24 ships a newer npm than
       # that, but pin it up anyway so a runner image change cannot silently drop
       # the publish back to token auth.
@@ -64,11 +55,9 @@ jobs:
         run: |
           npm install -g npm@latest
           npm --version
-
       - name: Install
         working-directory: bvx-kit
         run: npm ci || npm install
-
       - name: Guard - package.json must hold the GitHub Packages name
         working-directory: bvx-kit
         run: |
@@ -78,31 +67,25 @@ jobs:
             echo "package name is '$name'; expected '$GITHUB_PKG_NAME' - GitHub Packages requires the scope to match the repository owner (astrum-forge)" >&2
             exit 1
           fi
-
       - name: Stamp the version from the tag
         working-directory: bvx-kit
         run: |
           npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
           printf 'export default "%s";\n' "${{ steps.version.outputs.version }}" > src/version.ts
-
       - name: Test
         working-directory: bvx-kit
         run: npm run test:ci
-
       - name: Lint
         working-directory: bvx-kit
         run: npm run lint
-
       - name: Build
         working-directory: bvx-kit
         run: npm run build-ts
-
       - name: Stage README, LICENSE and SKILL.md into the package
         run: |
           cp README.md bvx-kit/README.md
           cp LICENSE bvx-kit/LICENSE
           cp SKILL.md bvx-kit/SKILL.md
-
       # npmjs goes first. It is the pass most likely to fail (trusted publishing
       # has to be configured for this repo and workflow on the npmjs side), and
       # failing before anything is published leaves the tag safe to re-run.
@@ -112,7 +95,6 @@ jobs:
           registry-url: https://registry.npmjs.org
           scope: "@astrumforge"
           package-manager-cache: false
-
       - name: Publish to npmjs
         working-directory: bvx-kit
         run: |
@@ -130,14 +112,12 @@ jobs:
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_READONLY_KEY }}
-
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           registry-url: https://npm.pkg.github.com
           scope: "@astrum-forge"
           package-manager-cache: false
-
       - name: Publish to GitHub Packages
         working-directory: bvx-kit
         run: |
@@ -153,14 +133,12 @@ jobs:
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Pack a tarball for the release assets
         id: pack
         working-directory: bvx-kit
         run: |
           file=$(npm pack --json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8'))[0].filename")
           echo "file=bvx-kit/${file}" >> "$GITHUB_OUTPUT"
-
       - name: Create the GitHub Release
         uses: softprops/action-gh-release@v3
         with:
