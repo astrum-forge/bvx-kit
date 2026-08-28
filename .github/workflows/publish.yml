@@ -1,0 +1,170 @@
+name: Publish
+
+# Publishing is tag driven. Push an annotated or lightweight tag named for the
+# version - `2.0.0`, or `v2.0.0` - and this builds, verifies, publishes to both
+# registries and opens a GitHub Release for it.
+#
+#   git tag 2.0.0 && git push origin 2.0.0
+#
+# Nothing publishes on a branch push, and nothing auto-bumps the version: the
+# tag is the single source of truth for what gets released.
+#
+# The package ships under two names because the registries disagree about the
+# scope. npmjs carries the historical `@astrumforge/bvx-kit` line; GitHub
+# Packages rejects any scope that is not the repository owner, and the owner is
+# `astrum-forge` (hyphenated). package.json holds the GitHub Packages name and
+# this workflow rewrites it for the npmjs pass.
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+-*"
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write # npmjs trusted publishing exchanges this OIDC token
+
+env:
+  NPMJS_NAME: "@astrumforge/bvx-kit"
+  GITHUB_PKG_NAME: "@astrum-forge/bvx-kit"
+
+jobs:
+  publish:
+    name: Publish to npmjs and GitHub Packages
+    runs-on: ubuntu-latest
+    environment: release
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version from tag
+        id: version
+        run: |
+          raw="${GITHUB_REF_NAME}"
+          version="${raw#v}"
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Releasing ${version} from tag ${raw}"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: bvx-kit/package-lock.json
+
+      # Trusted publishing needs npm >= 11.5.1. Node 24 ships a newer npm than
+      # that, but pin it up anyway so a runner image change cannot silently drop
+      # the publish back to token auth.
+      - name: Ensure npm supports trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - name: Install
+        working-directory: bvx-kit
+        run: npm ci || npm install
+
+      - name: Guard - package.json must hold the GitHub Packages name
+        working-directory: bvx-kit
+        run: |
+          name=$(node -p "require('./package.json').name")
+
+          if [ "$name" != "$GITHUB_PKG_NAME" ]; then
+            echo "package name is '$name'; expected '$GITHUB_PKG_NAME' - GitHub Packages requires the scope to match the repository owner (astrum-forge)" >&2
+            exit 1
+          fi
+
+      - name: Stamp the version from the tag
+        working-directory: bvx-kit
+        run: |
+          npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
+          printf 'export default "%s";\n' "${{ steps.version.outputs.version }}" > src/version.ts
+
+      - name: Test
+        working-directory: bvx-kit
+        run: npm run test:ci
+
+      - name: Lint
+        working-directory: bvx-kit
+        run: npm run lint
+
+      - name: Build
+        working-directory: bvx-kit
+        run: npm run build-ts
+
+      - name: Stage README, LICENSE and SKILL.md into the package
+        run: |
+          cp README.md bvx-kit/README.md
+          cp LICENSE bvx-kit/LICENSE
+          cp SKILL.md bvx-kit/SKILL.md
+
+      # npmjs goes first. It is the pass most likely to fail (trusted publishing
+      # has to be configured for this repo and workflow on the npmjs side), and
+      # failing before anything is published leaves the tag safe to re-run.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          scope: "@astrumforge"
+          package-manager-cache: false
+
+      - name: Publish to npmjs
+        working-directory: bvx-kit
+        run: |
+          npm pkg set name="$NPMJS_NAME"
+          npm pkg set publishConfig.registry="https://registry.npmjs.org"
+
+          version="${{ steps.version.outputs.version }}"
+
+          if npm view "${NPMJS_NAME}@${version}" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            echo "${NPMJS_NAME}@${version} is already on npmjs - skipping"
+          else
+            # Auth comes from the OIDC token via trusted publishing; provenance
+            # is attached automatically. NODE_AUTH_TOKEN covers the read side.
+            npm publish
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_READONLY_KEY }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://npm.pkg.github.com
+          scope: "@astrum-forge"
+          package-manager-cache: false
+
+      - name: Publish to GitHub Packages
+        working-directory: bvx-kit
+        run: |
+          npm pkg set name="$GITHUB_PKG_NAME"
+          npm pkg set publishConfig.registry="https://npm.pkg.github.com"
+
+          version="${{ steps.version.outputs.version }}"
+
+          if npm view "${GITHUB_PKG_NAME}@${version}" version --registry=https://npm.pkg.github.com >/dev/null 2>&1; then
+            echo "${GITHUB_PKG_NAME}@${version} is already on GitHub Packages - skipping"
+          else
+            npm publish
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pack a tarball for the release assets
+        id: pack
+        working-directory: bvx-kit
+        run: |
+          file=$(npm pack --json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8'))[0].filename")
+          echo "file=bvx-kit/${file}" >> "$GITHUB_OUTPUT"
+
+      - name: Create the GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: ${{ steps.pack.outputs.file }}

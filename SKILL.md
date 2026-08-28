@@ -1,13 +1,13 @@
 ---
 name: bvx-kit
-description: Work with the @astrum-forge/bvx-kit BitVoxel engine - creating voxel worlds and chunks, editing BitVoxel state and per-voxel meta-data, generating blocky, quad or smooth render geometry, raycasting, falling-grain physics layers (sand, water), binary serialization, and worker-pool meshing. Use when writing, reviewing or debugging code that imports @astrum-forge/bvx-kit or manipulates BitVoxels, voxel chunks or voxel meshes.
+description: Work with the @astrumforge/bvx-kit BitVoxel engine - creating voxel worlds and chunks, editing BitVoxel state and per-voxel meta-data, generating blocky, quad or smooth render geometry, raycasting, falling-grain physics layers (sand, water), binary serialization, and worker-pool meshing. Use when writing, reviewing or debugging code that imports @astrumforge/bvx-kit or manipulates BitVoxels, voxel chunks or voxel meshes.
 license: Apache-2.0
 ---
 
 # bvx-kit core API
 
 bvx-kit is a renderer-agnostic BitVoxel engine (ESM-only TypeScript, Node >= 20).
-Everything is imported from the package root: `import { ... } from '@astrum-forge/bvx-kit'`.
+Everything is imported from the package root: `import { ... } from '@astrumforge/bvx-kit'`.
 This file covers the core API and the rules that keep it fast and correct. `README.md`
 (shipped in this package) covers the concepts in prose.
 
@@ -36,18 +36,15 @@ in chunk-local space - place a chunk's mesh at `(key.x * 4, key.y * 4, key.z * 4
 
 ## Installation
 
-The package lives on GitHub Packages, which requires a token even for public reads
-(`read:packages` scope is enough):
-
-```ini
-# .npmrc, next to package.json
-@astrum-forge:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
-```
+The package is on npmjs - no registry config, no token:
 
 ```bash
-npm install @astrum-forge/bvx-kit
+npm install @astrumforge/bvx-kit
 ```
+
+It is also mirrored to GitHub Packages as `@astrum-forge/bvx-kit` (GitHub requires the
+scope to match the repository owner). Same package; that route needs an `.npmrc` and a
+`read:packages` token. Imports below use the npmjs name.
 
 ## Worlds and chunks
 
@@ -55,7 +52,7 @@ Chunk classes differ only in meta-data width: `VoxelChunk0` (none - `setMetaData
 no-op), `VoxelChunk8`, `VoxelChunk16`, `VoxelChunk32`.
 
 ```typescript
-import { VoxelWorld, VoxelChunk16, MortonKey } from '@astrum-forge/bvx-kit';
+import { VoxelWorld, VoxelChunk16, MortonKey } from '@astrumforge/bvx-kit';
 
 const world = new VoxelWorld();
 
@@ -76,7 +73,7 @@ and `insert` explicitly.
 All single-chunk edits go through a `VoxelIndex`:
 
 ```typescript
-import { VoxelIndex } from '@astrum-forge/bvx-kit';
+import { VoxelIndex } from '@astrumforge/bvx-kit';
 
 const voxel = VoxelIndex.from(1, 2, 3);        // voxel (1,2,3), bit (0,0,0)
 chunk.fillVoxel(voxel);                        // set all 64 BitVoxels of that voxel
@@ -98,7 +95,7 @@ chunk.isEmpty; chunk.isFull;
 To edit by global BitVoxel coordinate, split it with `WorldIndex`:
 
 ```typescript
-import { WorldIndex } from '@astrum-forge/bvx-kit';
+import { WorldIndex } from '@astrumforge/bvx-kit';
 
 const wi = WorldIndex.from(20, 5, 9);          // global BitVoxel (20,5,9)
 const target = world.get(wi.chunkIndex);
@@ -119,7 +116,7 @@ BitVoxel, chunk-local coordinates); only the index buffer is per-chunk. Upload t
 once, regenerate indices per dirty chunk:
 
 ```typescript
-import { VoxelFaceGeometry, BVXGeometry } from '@astrum-forge/bvx-kit';
+import { VoxelFaceGeometry, BVXGeometry } from '@astrumforge/bvx-kit';
 
 const faces = new VoxelFaceGeometry();
 faces.computeIndices(chunk, world);            // optional third arg: occluder world
@@ -142,7 +139,7 @@ with the static helpers (`indexOf`, `faceOf`, `occlusionOf`, `flippedOf`) and th
 `chunk.getMetaData(new VoxelIndex(VoxelQuadGeometry.indexOf(word)))`.
 
 ```typescript
-import { VoxelQuadGeometry } from '@astrum-forge/bvx-kit';
+import { VoxelQuadGeometry } from '@astrumforge/bvx-kit';
 
 const quads = new VoxelQuadGeometry();
 quads.computeQuads(chunk, world);   // (center, world, occluders?, occlusion?, source?)
@@ -155,7 +152,7 @@ Naive Surface Nets over the BitVoxel field, watertight across chunk seams. `smoo
 is 0-3 field blur passes (0 = classic surface nets):
 
 ```typescript
-import { VoxelSmoothGeometry } from '@astrum-forge/bvx-kit';
+import { VoxelSmoothGeometry } from '@astrumforge/bvx-kit';
 
 const smooth = new VoxelSmoothGeometry();
 smooth.computeGeometry(chunk, world, 2);
@@ -187,7 +184,7 @@ by 0.25 when using the shipped scale). The result is a `WorldIndex` for the firs
 BitVoxel, or `null`:
 
 ```typescript
-import { VoxelRay } from '@astrum-forge/bvx-kit';
+import { VoxelRay } from '@astrumforge/bvx-kit';
 
 const ray = new VoxelRay().set(sx, sy, sz, ex, ey, ez);
 const hit = world.raycaster.raycast(ray);
@@ -208,7 +205,7 @@ is never modified and acts as collision geometry. Layer coordinates are global B
 coordinates.
 
 ```typescript
-import { VoxelPhysics, MortonKey } from '@astrum-forge/bvx-kit';
+import { VoxelPhysics, MortonKey } from '@astrumforge/bvx-kit';
 
 const physics = new VoxelPhysics(world, { maxX: 127, maxY: 127, maxZ: 127 });
 const sand = physics.addLayer(VoxelPhysics.SAND);    // or WATER, or custom params
@@ -241,7 +238,7 @@ Compact, versioned binary. Where the bytes are stored (file, network, IndexedDB)
 application logic:
 
 ```typescript
-import { BVXSerializer } from '@astrum-forge/bvx-kit';
+import { BVXSerializer } from '@astrumforge/bvx-kit';
 
 const bytes = BVXSerializer.saveWorld(world);   // or saveChunk(chunk); Uint8Array
 const loaded = BVXSerializer.loadWorld(bytes);  // or loadChunk(bytes)
@@ -257,13 +254,13 @@ the pool handles dispatch, coalescing, cancellation and buffer recycling:
 
 ```typescript
 // mesher.worker.ts - the whole file
-import { BVXWorkerHost } from '@astrum-forge/bvx-kit';
+import { BVXWorkerHost } from '@astrumforge/bvx-kit';
 new BVXWorkerHost().attach(self as never);
 ```
 
 ```typescript
 // application side
-import { BVXMesherPool, ChunkNeighbourhoodPacker } from '@astrum-forge/bvx-kit';
+import { BVXMesherPool, ChunkNeighbourhoodPacker } from '@astrumforge/bvx-kit';
 
 const pool = new BVXMesherPool({
     workers: Array.from({ length: 4 }, () =>

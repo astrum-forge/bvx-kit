@@ -41,8 +41,17 @@ The **Geometry Lookup Table (LUT)** pre-computes **vertices**, **normals**, and 
 
 ## Installation
 
-The engine is published to **GitHub Packages**. Point the scope at that registry and
-authenticate - GitHub Packages requires a token even for public packages:
+Every release goes to two registries. **npmjs is the one to use** - no registry
+config and no token:
+
+```bash
+npm install @astrumforge/bvx-kit
+```
+
+The same build is also published to **GitHub Packages**, under the hyphenated scope
+`@astrum-forge` - GitHub requires the scope to match the repository owner. Reach for
+it only if you are already pulling packages from there; it needs an `.npmrc` and a
+token even though the package is public:
 
 ```ini
 # .npmrc, next to your package.json
@@ -57,7 +66,8 @@ npm install @astrum-forge/bvx-kit
 A `GITHUB_TOKEN` with `read:packages` is enough. In GitHub Actions the built-in
 `secrets.GITHUB_TOKEN` works as-is.
 
-> Upgrading from 1.x? The scope changed from `@astrumforge` to `@astrum-forge`.
+> The two names are the same package. Imports below use `@astrumforge/bvx-kit`;
+> swap the scope if you installed from GitHub Packages.
 
 ## AI Agent Skill
 
@@ -68,18 +78,18 @@ project:
 
 ```bash
 mkdir -p .claude/skills/bvx-kit
-cp node_modules/@astrum-forge/bvx-kit/SKILL.md .claude/skills/bvx-kit/SKILL.md
+cp node_modules/@astrumforge/bvx-kit/SKILL.md .claude/skills/bvx-kit/SKILL.md
 ```
 
 Agents without a skills mechanism can read it directly from
-`node_modules/@astrum-forge/bvx-kit/SKILL.md`.
+`node_modules/@astrumforge/bvx-kit/SKILL.md`.
 
 ## Quick Setup
 
 Here’s how you can quickly set up **BitVoxel Engine** and start managing voxel chunks within a voxel world:
 
 ```typescript
-import { MortonKey, VoxelChunk, VoxelChunk32, VoxelWorld } from '@astrum-forge/bvx-kit';
+import { MortonKey, VoxelChunk, VoxelChunk32, VoxelWorld } from '@astrumforge/bvx-kit';
 
 // Create a new VoxelWorld instance
 const world: VoxelWorld = new VoxelWorld();
@@ -104,7 +114,7 @@ if (prevChunk !== null) {
 In addition to the blocky face geometry path (`VoxelFaceGeometry` + `BVXGeometry`), the engine provides **`VoxelSmoothGeometry`**, a Naive Surface Nets mesher that generates smooth, renderer-agnostic triangle meshes (positions, normals and indices) directly from BitVoxel data. Meshes are watertight across chunk seams and an optional smoothing parameter (0-3 field blur passes) produces progressively softer surfaces:
 
 ```typescript
-import { VoxelSmoothGeometry } from '@astrum-forge/bvx-kit';
+import { VoxelSmoothGeometry } from '@astrumforge/bvx-kit';
 
 const geometry = new VoxelSmoothGeometry();
 
@@ -122,7 +132,7 @@ renderer.upload(geometry.vertices, geometry.normals, geometry.indices);
 The application drives the simulation through an explicit update hook and remeshes only what moved:
 
 ```typescript
-import { VoxelPhysics } from '@astrum-forge/bvx-kit';
+import { VoxelPhysics } from '@astrumforge/bvx-kit';
 
 const physics = new VoxelPhysics(world, { maxX: 127, maxY: 127, maxZ: 127 });
 const sand = physics.addLayer(VoxelPhysics.SAND);
@@ -146,7 +156,7 @@ Grains that cannot move go dormant and cost nothing until a nearby cell changes 
 **`BVXSerializer`** provides compact, versioned binary serialization for single chunks or entire worlds. Saving returns the binary data and loading accepts the binary data — where the bytes are stored (file, network, IndexedDB) is application logic. BitVoxel layers and meta-data are run-length encoded when that is smaller than the raw payload:
 
 ```typescript
-import { BVXSerializer } from '@astrum-forge/bvx-kit';
+import { BVXSerializer } from '@astrumforge/bvx-kit';
 
 const chunkBytes: Uint8Array = BVXSerializer.saveChunk(chunk);
 const worldBytes: Uint8Array = BVXSerializer.saveWorld(world);
@@ -161,14 +171,14 @@ Geometry generation moves off the main thread with **`BVXMesher`**, **`BVXWorker
 
 ```typescript
 // mesher.worker.ts - your application's worker entry
-import { BVXWorkerHost } from '@astrum-forge/bvx-kit';
+import { BVXWorkerHost } from '@astrumforge/bvx-kit';
 
 new BVXWorkerHost().attach(self as never);
 ```
 
 ```typescript
 // your application
-import { BVXMesherPool, ChunkNeighbourhoodPacker } from '@astrum-forge/bvx-kit';
+import { BVXMesherPool, ChunkNeighbourhoodPacker } from '@astrumforge/bvx-kit';
 
 const pool = new BVXMesherPool({
   workers: Array.from({ length: 4 }, () =>
